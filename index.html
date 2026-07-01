@@ -1,0 +1,3470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAMI Project Portfolio</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --sa-blue: #005EB8;
+    --sa-blue-dark: #003E7E;
+    --sami-mint: #77F0C7;
+    --sami-mint-soft: #E7FFF7;
+    --sami-mint-mid: #20D8A3;
+    --ink: #111827;
+    --charcoal: #4B5563;
+    --muted: #6B7280;
+    --line: #D6DEE8;
+    --paper: #FFFFFF;
+    --bg: #F3F7FA;
+    --bg2: #EAF6F5;
+    --blocked: #C62828;
+    --blocked-bg: #FFF1F1;
+    --ready: #008A6A;
+    --ready-bg: #E8FFF8;
+    --running: #005EB8;
+    --running-bg: #EEF6FF;
+    --done: #667085;
+    --done-bg: #F4F5F7;
+    --next: #B45309;
+    --next-bg: #FFF7E6;
+    --highlight: #00A889;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+    background:
+      radial-gradient(circle at 82% 8%, rgba(119, 240, 199, 0.34), transparent 25rem),
+      linear-gradient(180deg, #ffffff 0%, var(--bg) 45%, var(--bg2) 100%);
+    color: var(--ink);
+    min-height: 100vh;
+    padding: 1.25rem;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    right: -9rem;
+    top: -9rem;
+    width: 28rem;
+    height: 28rem;
+    border-radius: 50%;
+    background: repeating-conic-gradient(from 0deg, rgba(119,240,199,0.55) 0deg 3deg, transparent 3deg 8deg);
+    mask: radial-gradient(circle, transparent 0 34%, #000 35% 100%);
+    opacity: 0.45;
+    pointer-events: none;
+    z-index: -1;
+  }
+  .splash {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: grid;
+    place-items: center;
+    background:
+      radial-gradient(circle at 68% 38%, rgba(0, 174, 199, 0.16), transparent 18rem),
+      radial-gradient(circle at 32% 64%, rgba(32, 216, 163, 0.12), transparent 16rem),
+      #f8fbfd;
+    opacity: 1;
+    transition: opacity 0.28s ease, visibility 0.28s ease;
+  }
+  .splash.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+  .splash-card {
+    width: min(560px, calc(100vw - 2rem));
+    background: rgba(255,255,255,0.94);
+    border: 1px solid rgba(214,222,232,0.92);
+    border-radius: 18px;
+    box-shadow: 0 26px 80px rgba(0,62,126,0.16);
+    overflow: hidden;
+  }
+  .splash-accent {
+    height: 7px;
+    background: linear-gradient(90deg, var(--sa-blue), var(--sa-cyan), var(--highlight));
+  }
+  .splash-body {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 1rem;
+    align-items: center;
+    padding: 1.4rem;
+  }
+  .splash-mark {
+    width: 4.3rem;
+    height: 4.3rem;
+    border-radius: 50%;
+    border: 3px solid var(--sa-cyan);
+    box-shadow: inset 0 0 0 12px rgba(0, 118, 142, 0.10), 0 0 0 8px rgba(0, 118, 142, 0.06);
+    position: relative;
+    animation: splashPulse 1.6s ease-in-out infinite;
+  }
+  .splash-mark::before,
+  .splash-mark::after {
+    content: "";
+    position: absolute;
+    border-radius: 50%;
+    inset: 0.9rem;
+    border: 2px solid rgba(32,216,163,0.62);
+  }
+  .splash-mark::after {
+    inset: 1.65rem;
+    background: var(--sa-cyan);
+    border: 0;
+  }
+  .splash h1 {
+    color: var(--sa-blue-dark);
+    font-size: clamp(1.45rem, 3vw, 2.1rem);
+    margin: 0 0 0.25rem;
+    line-height: 1.08;
+  }
+  .splash .subtitle {
+    color: var(--charcoal);
+    font-size: 0.92rem;
+    margin-bottom: 0.55rem;
+  }
+  .splash-status {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  @keyframes splashPulse {
+    0%, 100% { transform: scale(1); opacity: 0.92; }
+    50% { transform: scale(1.035); opacity: 1; }
+  }
+  .topbar {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: 0 12px 32px rgba(0, 62, 126, 0.10);
+    overflow: hidden;
+    margin-bottom: 1rem;
+  }
+  .brand-strip {
+    height: 8px;
+    background: linear-gradient(90deg, var(--sa-blue) 0 42%, var(--sami-mint-mid) 42% 72%, #111827 72% 100%);
+  }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.9rem 1rem;
+    flex-wrap: wrap;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    min-width: 0;
+  }
+  .brand img {
+    height: 56px;
+    width: auto;
+    max-width: min(460px, 58vw);
+    object-fit: contain;
+  }
+  .title-block {
+    border-left: 4px solid var(--sami-mint-mid);
+    padding-left: 0.85rem;
+  }
+  .title-block h1 {
+    font-size: 1.15rem;
+    line-height: 1.15;
+    color: var(--sa-blue-dark);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+  .title-block .subtitle {
+    margin-top: 0.18rem;
+    color: var(--charcoal);
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-family: "Courier New", ui-monospace, monospace;
+  }
+  .header-right {
+    display: flex;
+    gap: 0.55rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .sync-indicator {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 0.48rem;
+    min-width: 285px;
+    padding: 0.42rem 0.58rem;
+    border: 1px solid rgba(0,94,184,0.18);
+    border-radius: 10px;
+    background: rgba(255,255,255,0.82);
+    box-shadow: 0 5px 15px rgba(0,62,126,0.06);
+  }
+  .sync-dot { width: 0.58rem; height: 0.58rem; border-radius: 50%; background: var(--running); box-shadow: 0 0 0 3px rgba(0,94,184,0.10); }
+  .sync-indicator.synced .sync-dot { background: var(--ready); box-shadow: 0 0 0 3px rgba(0,168,137,0.12); }
+  .sync-indicator.warning .sync-dot { background: var(--next); box-shadow: 0 0 0 3px rgba(181,107,10,0.12); }
+  .sync-indicator.offline .sync-dot { background: var(--blocked); box-shadow: 0 0 0 3px rgba(214,69,69,0.12); }
+  .sync-copy { min-width: 0; }
+  .sync-label { display: block; color: var(--sa-blue-dark); font-size: 0.7rem; line-height: 1.2; font-weight: 800; }
+  .sync-meta { display: block; margin-top: 0.08rem; color: var(--muted); font-size: 0.61rem; line-height: 1.2; white-space: nowrap; }
+  .sync-clock { padding-left: 0.5rem; border-left: 1px solid var(--line); color: var(--charcoal); font-size: 0.68rem; font-weight: 750; white-space: nowrap; }
+  .overview-panel {
+    margin-bottom: 0.65rem;
+  }
+  .overview-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    border: 1px solid rgba(0, 118, 142, 0.22);
+    background: rgba(255,255,255,0.72);
+    color: var(--ink);
+    border-radius: 10px;
+    padding: 0.52rem 0.7rem;
+    font-size: 0.82rem;
+    font-weight: 800;
+    box-shadow: 0 6px 18px rgba(0, 62, 126, 0.06);
+  }
+  .overview-toggle:hover {
+    background: rgba(232, 251, 255, 0.82);
+    border-color: rgba(0, 118, 142, 0.38);
+  }
+  .overview-icon {
+    width: 1.05rem;
+    height: 1.05rem;
+    border-radius: 50%;
+    border: 2px solid var(--sa-cyan);
+    box-shadow: inset 0 0 0 3px rgba(0, 118, 142, 0.16), 0 0 0 2px rgba(0, 118, 142, 0.08);
+    flex: 0 0 auto;
+  }
+  .overview-chevron {
+    width: 0.48rem;
+    height: 0.48rem;
+    border-right: 2px solid var(--charcoal);
+    border-bottom: 2px solid var(--charcoal);
+    margin-left: auto;
+    transform: rotate(45deg);
+    transition: transform 0.18s ease;
+  }
+  .overview-panel.open .overview-chevron {
+    transform: rotate(225deg);
+  }
+  .overview-panel:not(.open) .stats {
+    display: none;
+  }
+  .overview-panel.open .stats {
+    margin-top: 0.55rem;
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(110px, 1fr));
+    gap: 0.55rem;
+    margin-bottom: 0.85rem;
+  }
+  .stat {
+    background: rgba(255,255,255,0.92);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 0.55rem 0.7rem;
+    font-size: 0.72rem;
+    color: var(--muted);
+    box-shadow: 0 6px 16px rgba(0, 62, 126, 0.06);
+  }
+  .stat b { display:block; color: var(--ink); font-size: 1.05rem; line-height: 1; margin-bottom: 0.15rem; }
+  .board {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(260px, 1fr));
+    gap: 0.9rem;
+    align-items: start;
+  }
+  .column {
+    min-width: 0;
+    background: rgba(255,255,255,0.56);
+    border: 1px solid rgba(214,222,232,0.9);
+    border-radius: 12px;
+    padding: 0.55rem;
+    backdrop-filter: blur(5px);
+  }
+  .col-header {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.65rem 0.75rem;
+    border-radius: 9px;
+    font-size: 0.76rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-bottom: 0.55rem;
+    font-family: "Courier New", ui-monospace, monospace;
+  }
+  .col-header .count {
+    margin-left: auto;
+    font-family: Arial, Helvetica, sans-serif;
+    background: rgba(255,255,255,0.72);
+    color: var(--ink);
+    font-size: 0.72rem;
+    padding: 0.12rem 0.5rem;
+    border-radius: 999px;
+    font-weight: 800;
+  }
+  .col-blocked { background: var(--blocked-bg); color: var(--blocked); border: 1px solid #f4b3b3; }
+  .col-ready { background: var(--ready-bg); color: var(--ready); border: 1px solid #9ff0d6; }
+  .col-running { background: var(--running-bg); color: var(--running); border: 1px solid #a7d2ff; }
+  .col-done { background: var(--done-bg); color: var(--done); border: 1px solid #d3d8df; }
+  .card {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-left: 5px solid var(--line);
+    border-radius: 10px;
+    padding: 0.72rem 0.78rem;
+    margin-bottom: 0.55rem;
+    box-shadow: 0 4px 12px rgba(17,24,39,0.06);
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  }
+  .card:hover { box-shadow: 0 10px 24px rgba(0,94,184,0.13); transform: translateY(-1px); }
+  .card.s-blocked { border-left-color: var(--blocked); }
+  .card.s-ready { border-left-color: var(--ready); }
+  .card.s-backlog { border-left-color: var(--ready); }
+  .card.s-running { border-left-color: var(--running); }
+  .card.s-done { border-left-color: var(--done); opacity: 0.84; }
+  .card.highlight {
+    border-color: rgba(32,216,163,0.75);
+    box-shadow: 0 0 0 2px rgba(119,240,199,0.22), 0 6px 18px rgba(0,168,137,0.10);
+  }
+  .card.recent-strong {
+    border-color: rgba(0, 168, 137, 0.72);
+    box-shadow: 0 0 0 2px rgba(119,240,199,0.22), 0 8px 22px rgba(0,168,137,0.12);
+  }
+  .card.recent-soft {
+    border-color: rgba(0, 94, 184, 0.32);
+    box-shadow: 0 6px 18px rgba(0,94,184,0.10);
+  }
+  .card.recent-focus {
+    animation: recentPulse 1.8s ease 1;
+  }
+  body.recent-filter-active .card:not(.recent-soft):not(.recent-strong) {
+    opacity: 0.54;
+  }
+  body.recent-filter-active .card.recent-soft,
+  body.recent-filter-active .card.recent-strong {
+    transform: translateY(-1px);
+  }
+  @keyframes recentPulse {
+    0% { box-shadow: 0 0 0 0 rgba(32,216,163,0.48), 0 4px 12px rgba(17,24,39,0.06); }
+    100% { box-shadow: 0 0 0 12px rgba(32,216,163,0), 0 8px 22px rgba(0,168,137,0.12); }
+  }
+  .highlight-tag {
+    display: inline-block;
+    font-size: 0.62rem;
+    background: linear-gradient(90deg, var(--sa-blue), var(--highlight));
+    color: #fff;
+    padding: 0.13rem 0.45rem;
+    border-radius: 999px;
+    margin-bottom: 0.36rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .card .title {
+    font-size: 0.88rem;
+    font-weight: 800;
+    line-height: 1.25;
+    margin-bottom: 0.38rem;
+    color: var(--ink);
+  }
+  .card .context {
+    font-size: 0.75rem;
+    color: var(--charcoal);
+    line-height: 1.42;
+    margin-bottom: 0.42rem;
+  }
+  .blocked-bar {
+    font-size: 0.72rem;
+    background: var(--blocked-bg);
+    border-left: 3px solid var(--blocked);
+    padding: 0.38rem 0.52rem;
+    border-radius: 0 6px 6px 0;
+    margin-bottom: 0.42rem;
+    color: #8f1b1b;
+    font-weight: 650;
+  }
+  .next-step {
+    font-size: 0.74rem;
+    line-height: 1.38;
+    background: var(--next-bg);
+    border-left: 3px solid var(--next);
+    padding: 0.4rem 0.55rem;
+    border-radius: 0 6px 6px 0;
+    margin-top: 0.35rem;
+    color: #5f370e;
+  }
+  .next-step b { color: var(--next); text-transform: uppercase; font-size: 0.68rem; letter-spacing: 0.05em; }
+  .people {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.45rem;
+  }
+  .people span {
+    font-size: 0.64rem;
+    background: var(--sami-mint-soft);
+    color: #006a55;
+    border: 1px solid #b7f4df;
+    padding: 0.12rem 0.4rem;
+    border-radius: 999px;
+    font-weight: 650;
+  }
+  .lead-row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0.38rem 0 0.44rem;
+    font-size: 0.72rem;
+    color: var(--charcoal);
+    font-weight: 700;
+  }
+  .lead-row span {
+    color: var(--muted);
+    font-weight: 800;
+    text-transform: uppercase;
+    font-size: 0.62rem;
+    letter-spacing: 0.04em;
+  }
+  .lead-row input {
+    flex: 1;
+    min-width: 0;
+    height: 1.75rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 0.2rem 0.42rem;
+    font: inherit;
+    font-weight: 700;
+    color: var(--ink);
+    background: #fff;
+  }
+  .empty-col, .error {
+    text-align: center;
+    padding: 1.5rem 0.5rem;
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+  .error { color: var(--blocked); background: var(--blocked-bg); border: 1px solid #f4b3b3; border-radius: 8px; }
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+    margin-bottom: 1rem;
+    align-items: center;
+  }
+  .recent-strip {
+    margin-bottom: 0.85rem;
+    background: rgba(255,255,255,0.9);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 0.62rem 0.72rem;
+    box-shadow: 0 6px 18px rgba(0,62,126,0.06);
+  }
+  .recent-strip-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.7rem;
+    margin-bottom: 0.48rem;
+  }
+  .recent-strip-title {
+    color: var(--sa-blue-dark);
+    font-size: 0.76rem;
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-family: "Courier New", ui-monospace, monospace;
+  }
+  .recent-toggle {
+    padding: 0.32rem 0.58rem;
+    font-size: 0.7rem;
+  }
+  .recent-toggle.active {
+    background: var(--sami-mint-soft);
+    border-color: #9ff0d6;
+    color: #006a55;
+  }
+  .recent-strip-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+  .recent-strip-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    max-width: min(24rem, 100%);
+    border: 1px solid rgba(0,118,142,0.18);
+    background: #fff;
+    color: var(--ink);
+    border-radius: 999px;
+    padding: 0.28rem 0.55rem;
+    font-size: 0.72rem;
+    font-weight: 750;
+    text-align: left;
+  }
+  .recent-strip-item span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .recent-strip-item time {
+    color: var(--muted);
+    font-size: 0.66rem;
+    flex: none;
+  }
+  .folder-action { display:inline-flex; align-items:center; gap:0.32rem; margin-left:auto; padding:0.24rem 0.46rem; font-size:0.66rem; white-space:nowrap; }
+  .folder-dot { width:0.48rem; height:0.48rem; border-radius:50%; background:#9ca3af; box-shadow:0 0 0 2px rgba(156,163,175,0.14); }
+  .folder-dot.canonical { background:var(--ready); box-shadow:0 0 0 2px rgba(0,168,137,0.15); }
+  .folder-dot.warning { background:var(--next); box-shadow:0 0 0 2px rgba(217,119,6,0.15); }
+  .folder-dot.none { background:#9ca3af; }
+  .project-modal { position:fixed; inset:0; z-index:125; display:none; place-items:center; padding:1rem; background:rgba(17,24,39,0.52); }
+  .project-modal.open { display:grid; }
+  .project-modal-card { width:min(860px,100%); max-height:calc(100vh - 2rem); overflow:auto; background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:0 28px 80px rgba(0,62,126,0.22); padding:1.15rem; }
+  .project-modal-head { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; margin-bottom:0.9rem; }
+  .project-modal-head h2 { color:var(--sa-blue-dark); font-size:1.15rem; margin:0; }
+  .project-mode-tabs { display:flex; gap:0.45rem; margin-bottom:0.85rem; }
+  .project-mode-tabs button.active { background:var(--running-bg); border-color:#a7d2ff; color:var(--sa-blue-dark); }
+  .project-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0.72rem; }
+  .project-form-grid .span-2 { grid-column:1 / -1; }
+  .project-form-grid label, .bulk-label { display:block; font-size:0.72rem; font-weight:800; color:var(--charcoal); margin-bottom:0.25rem; }
+  .project-form-grid input, .project-form-grid select, .project-form-grid textarea, #bulkProjectText { width:100%; border:1px solid var(--line); border-radius:7px; padding:0.52rem 0.58rem; font:inherit; color:var(--ink); background:#fff; }
+  .project-form-grid textarea { min-height:4.5rem; resize:vertical; }
+  .project-checks { display:flex; flex-wrap:wrap; gap:1rem; align-items:center; margin:0.6rem 0; }
+  .project-checks label { display:inline-flex; align-items:center; gap:0.4rem; margin:0; font-size:0.74rem; font-weight:750; }
+  .project-checks input { width:auto; }
+  .slug-preview { padding:0.48rem 0.6rem; background:#f8fafc; border:1px solid var(--line); border-radius:7px; color:var(--muted); font-size:0.73rem; font-family:"Courier New",ui-monospace,monospace; }
+  .form-error { color:var(--blocked); font-size:0.73rem; min-height:1rem; margin-top:0.45rem; }
+  .bulk-panel[hidden], .single-panel[hidden] { display:none; }
+  #bulkProjectText { min-height:10rem; resize:vertical; }
+  .bulk-preview-wrap { overflow-x:auto; margin-top:0.7rem; }
+  .bulk-preview { width:100%; border-collapse:collapse; font-size:0.71rem; }
+  .bulk-preview th, .bulk-preview td { border-bottom:1px solid var(--line); padding:0.42rem; text-align:left; vertical-align:top; }
+  .bulk-preview th { color:var(--sa-blue-dark); background:#f8fafc; }
+  .bulk-preview tr.invalid td { background:var(--blocked-bg); color:#8f1b1b; }
+  @media (max-width:700px) { .project-form-grid { grid-template-columns:1fr; } .project-form-grid .span-2 { grid-column:auto; } }
+  .presentation-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.42rem;
+  }
+  .presentation-icon {
+    width: 1rem;
+    height: 0.72rem;
+    border: 2px solid var(--sa-cyan);
+    border-radius: 3px;
+    box-shadow: inset 0 0 0 2px rgba(0, 118, 142, 0.12);
+    position: relative;
+    flex: 0 0 auto;
+  }
+  .presentation-icon::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -0.35rem;
+    width: 0.56rem;
+    height: 2px;
+    background: var(--sa-cyan);
+    transform: translateX(-50%);
+    border-radius: 999px;
+  }
+  .health-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(150px, 1fr));
+    gap: 0.55rem;
+    margin-bottom: 1rem;
+  }
+  .summary-tile {
+    background: rgba(255,255,255,0.94);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 0.65rem 0.75rem;
+    box-shadow: 0 6px 16px rgba(0, 62, 126, 0.06);
+  }
+  .summary-tile b { display:block; font-size: 1.18rem; line-height: 1; margin-bottom: 0.18rem; }
+  .summary-tile span { color: var(--muted); font-size: 0.72rem; font-weight: 750; }
+  .summary-tile.green b { color: var(--ready); }
+  .summary-tile.amber b { color: var(--next); }
+  .summary-tile.red b { color: var(--blocked); }
+  .edit-state {
+    background: var(--done-bg);
+    border: 1px solid #d3d8df;
+    color: var(--done);
+    padding: 0.42rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 800;
+  }
+  .edit-state.unlocked {
+    background: var(--ready-bg);
+    border-color: #9ff0d6;
+    color: var(--ready);
+  }
+  button {
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--ink);
+    border-radius: 8px;
+    padding: 0.48rem 0.7rem;
+    font-size: 0.76rem;
+    font-weight: 750;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--sa-blue); color: var(--sa-blue-dark); }
+  button.primary { background: var(--sa-blue); border-color: var(--sa-blue); color: #fff; }
+  button.danger { background: var(--blocked-bg); border-color: #f4b3b3; color: var(--blocked); }
+  button.good { background: var(--ready-bg); border-color: #9ff0d6; color: var(--ready); }
+  button:disabled { opacity: 0.55; cursor: not-allowed; }
+  .health-panel {
+    display: none;
+    background: rgba(255,255,255,0.92);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 0.8rem;
+    margin-bottom: 1rem;
+  }
+  .health-panel.open { display: block; }
+  .health-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(180px, 1fr));
+    gap: 0.6rem;
+  }
+  .health-group {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.55rem;
+    background: #fff;
+    min-height: 4rem;
+  }
+  .health-group h3 {
+    font-size: 0.74rem;
+    color: var(--sa-blue-dark);
+    margin-bottom: 0.35rem;
+  }
+  .health-group button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    margin-top: 0.25rem;
+    font-weight: 650;
+  }
+  .card-topline {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.45rem;
+    margin-bottom: 0.35rem;
+  }
+  .card-topline .title { flex: 1; margin-bottom: 0; }
+  .mini-btn {
+    padding: 0.22rem 0.42rem;
+    font-size: 0.68rem;
+    border-radius: 6px;
+    flex: none;
+  }
+  .present-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: var(--sa-blue-dark);
+    font-size: 0.68rem;
+    font-weight: 800;
+    border: 1px solid rgba(0, 118, 142, 0.24);
+    border-radius: 6px;
+    padding: 0.2rem 0.38rem;
+    background: rgba(232, 251, 255, 0.66);
+    flex: none;
+    cursor: pointer;
+  }
+  .present-check input {
+    width: auto;
+    margin: 0;
+    accent-color: var(--sa-cyan);
+  }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.28rem;
+    margin-top: 0.42rem;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    font-size: 0.62rem;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    padding: 0.12rem 0.38rem;
+    color: var(--charcoal);
+    background: #fff;
+    font-weight: 750;
+  }
+  .badge.healthy { background: var(--ready-bg); border-color: #9ff0d6; color: var(--ready); }
+  .badge.needs { background: var(--next-bg); border-color: #f2cf87; color: var(--next); }
+  .badge.stale { background: #fff3e8; border-color: #f0b37e; color: #9a4a10; }
+  .badge.blocked { background: var(--blocked-bg); border-color: #f4b3b3; color: var(--blocked); }
+  .badge.done { background: var(--done-bg); border-color: #d3d8df; color: var(--done); }
+  .badge.risk-green { border-color: #9ff0d6; color: var(--ready); }
+  .badge.risk-amber { border-color: #f2cf87; color: var(--next); }
+  .badge.risk-red { border-color: #f4b3b3; color: var(--blocked); }
+  .badge.updated {
+    background: #fff;
+    border-color: rgba(0,118,142,0.18);
+    color: var(--muted);
+  }
+  .badge.updated.today {
+    background: var(--sami-mint-soft);
+    border-color: #9ff0d6;
+    color: #006a55;
+  }
+  .badge.updated.week {
+    background: var(--running-bg);
+    border-color: #a7d2ff;
+    color: var(--sa-blue-dark);
+  }
+  .file-visibility:empty { display: none; }
+  .badge.file-count {
+    background: #f7fafc;
+    border-color: rgba(0,94,184,0.16);
+    color: var(--muted);
+    font-weight: 700;
+  }
+  .badge.file-review {
+    background: #fffaf0;
+    border-color: rgba(181,107,10,0.24);
+    color: #8a5108;
+    font-weight: 700;
+  }
+  .card-activity-line {
+    margin-top: 0.32rem;
+    color: var(--muted);
+    font-size: 0.64rem;
+    line-height: 1.25;
+  }
+  .card-activity-line:empty { display: none; }
+  .card-top-actions { display: inline-flex; align-items: center; gap: 0.3rem; flex: none; }
+  .details-btn[aria-expanded="true"] { background: var(--running-bg); border-color: #a7d2ff; color: var(--sa-blue-dark); }
+  .card-details-panel {
+    margin-top: 0.6rem;
+    padding: 0.7rem;
+    border: 1px solid rgba(0,94,184,0.16);
+    border-radius: 9px;
+    background: #fbfdff;
+  }
+  .card-details-panel[hidden] { display: none; }
+  .details-section + .details-section { margin-top: 0.7rem; padding-top: 0.65rem; border-top: 1px solid rgba(17,24,39,0.08); }
+  .details-section h4 { margin: 0 0 0.42rem; color: var(--sa-blue-dark); font-size: 0.73rem; }
+  .details-glance { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 0.3rem 0.65rem; }
+  .details-field { min-width: 0; }
+  .details-field span { display: block; color: var(--muted); font-size: 0.59rem; text-transform: uppercase; letter-spacing: 0.035em; }
+  .details-field b { display: block; margin-top: 0.08rem; color: var(--charcoal); font-size: 0.68rem; font-weight: 700; overflow-wrap: anywhere; }
+  .details-field.wide { grid-column: 1 / -1; }
+  .details-counts { display: flex; flex-wrap: wrap; gap: 0.28rem; }
+  .details-count { padding: 0.18rem 0.34rem; border-radius: 6px; background: #fff; border: 1px solid var(--line); color: var(--charcoal); font-size: 0.63rem; }
+  .details-actions { margin-top: 0.5rem; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  .details-actions .folder-action { margin-left: 0; }
+  .details-notes { margin-top: 0.5rem; color: var(--muted); font-size: 0.66rem; }
+  .details-notes summary { cursor: pointer; font-weight: 700; color: var(--sa-blue-dark); }
+  .details-notes div { margin-top: 0.32rem; color: var(--charcoal); line-height: 1.4; white-space: pre-wrap; }
+  .details-activity-toggle { margin-top: 0.42rem; padding: 0.25rem 0.42rem; font-size: 0.63rem; }
+  .wip-warning {
+    font-size: 0.68rem;
+    color: var(--blocked);
+    margin-left: auto;
+    text-transform: none;
+    letter-spacing: 0;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  .drawer-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(17,24,39,0.38);
+    z-index: 20;
+  }
+  .drawer-backdrop.open { display: block; }
+  .drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: min(560px, 100vw);
+    height: 100vh;
+    overflow: auto;
+    background: #fff;
+    border-left: 1px solid var(--line);
+    box-shadow: -14px 0 34px rgba(17,24,39,0.18);
+    z-index: 21;
+    transform: translateX(100%);
+    transition: transform 0.18s ease;
+    padding: 1rem;
+  }
+  .drawer.open { transform: translateX(0); }
+  .drawer h2 { font-size: 1rem; color: var(--sa-blue-dark); margin-bottom: 0.3rem; }
+  .drawer .drawer-subtitle { color: var(--muted); font-size: 0.76rem; margin-bottom: 0.85rem; }
+  .drawer-files {
+    margin-top: 0.9rem;
+    padding: 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: #f8fafc;
+  }
+  .drawer-files[hidden] { display: none; }
+  .drawer-files h3 { margin: 0 0 0.55rem; color: var(--sa-blue-dark); font-size: 0.82rem; }
+  .drawer-file-counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.3rem 0.75rem; }
+  .drawer-file-counts div { display: flex; justify-content: space-between; gap: 0.5rem; color: var(--charcoal); font-size: 0.7rem; }
+  .drawer-file-counts b { color: var(--ink); }
+  .drawer-file-actions { margin-top: 0.65rem; }
+  .drawer-file-actions .folder-action { margin-left: 0; }
+  .drawer-file-date { margin-bottom: 0.5rem; color: var(--muted); font-size: 0.68rem; }
+  .drawer-activity {
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: #fff;
+  }
+  .drawer-activity[hidden] { display: none; }
+  .drawer-activity h3 { margin: 0 0 0.45rem; color: var(--sa-blue-dark); font-size: 0.82rem; }
+  .activity-item { padding: 0.42rem 0; border-top: 1px solid rgba(17,24,39,0.07); }
+  .activity-item:first-child { border-top: 0; padding-top: 0; }
+  .activity-item-head { display: flex; justify-content: space-between; gap: 0.7rem; font-size: 0.69rem; }
+  .activity-item-head b { color: var(--charcoal); font-weight: 750; }
+  .activity-item-head time { color: var(--muted); white-space: nowrap; }
+  .activity-change { margin-top: 0.18rem; color: var(--muted); font-size: 0.64rem; overflow-wrap: anywhere; }
+  .activity-toggle { margin-top: 0.5rem; padding: 0.3rem 0.48rem; font-size: 0.66rem; }
+  body.presentation-active .drawer-files,
+  body.presentation-active .drawer-activity,
+  body.presentation-active .details-btn,
+  body.presentation-active .card-details-panel { display: none !important; }
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.65rem;
+  }
+  label { display: block; font-size: 0.7rem; font-weight: 800; color: var(--charcoal); margin-bottom: 0.22rem; }
+  input, select, textarea {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.48rem 0.55rem;
+    font: inherit;
+    font-size: 0.78rem;
+    color: var(--ink);
+    background: #fff;
+  }
+  textarea { min-height: 4.7rem; resize: vertical; }
+  .span-2 { grid-column: 1 / -1; }
+  .drawer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.9rem;
+    padding-top: 0.8rem;
+    border-top: 1px solid var(--line);
+  }
+  .notice {
+    display: none;
+    margin-bottom: 1rem;
+    border-radius: 8px;
+    padding: 0.65rem 0.8rem;
+    font-size: 0.78rem;
+  }
+  .notice.open { display: block; }
+  .notice.error { color: var(--blocked); background: var(--blocked-bg); border: 1px solid #f4b3b3; }
+  .notice.ok { color: var(--ready); background: var(--ready-bg); border: 1px solid #9ff0d6; }
+  .review-card {
+    display: none;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 0.9rem;
+    margin-bottom: 1rem;
+  }
+  .review-card.open { display: block; }
+  .review-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+    gap: 0.45rem;
+    font-size: 0.77rem;
+    margin: 0.65rem 0;
+  }
+  .review-fields b { color: var(--sa-blue-dark); }
+  .summary-box {
+    display: none;
+    margin-bottom: 1rem;
+  }
+  .summary-box.open { display: block; }
+  .summary-box textarea { min-height: 9rem; font-family: "Courier New", ui-monospace, monospace; }
+  .presentation-panel {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: rgba(17,24,39,0.42);
+    padding: clamp(1rem, 3vw, 2.4rem);
+    overflow: auto;
+  }
+  .presentation-panel.open { display: block; }
+  .presentation-setup {
+    max-width: 980px;
+    margin: 0 auto;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: 0 24px 70px rgba(17,24,39,0.24);
+    padding: 1rem;
+  }
+  .presentation-setup h2 {
+    color: var(--sa-blue-dark);
+    font-size: 1.05rem;
+    margin-bottom: 0.25rem;
+  }
+  .presentation-setup .subtle {
+    color: var(--muted);
+    font-size: 0.78rem;
+    margin-bottom: 0.8rem;
+  }
+  .presentation-layout {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) minmax(280px, 1.15fr);
+    gap: 0.8rem;
+  }
+  .presentation-list,
+  .presentation-picker {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 0.7rem;
+    background: rgba(248,250,252,0.8);
+    min-height: 16rem;
+  }
+  .presentation-list h3,
+  .presentation-picker h3 {
+    font-size: 0.78rem;
+    color: var(--charcoal);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.55rem;
+  }
+  .selected-list,
+  .picker-list {
+    display: grid;
+    gap: 0.38rem;
+    max-height: 42vh;
+    overflow: auto;
+  }
+  .selected-row,
+  .picker-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 0.42rem;
+    padding: 0.38rem 0.45rem;
+    border: 1px solid rgba(214,222,232,0.9);
+    border-radius: 8px;
+    background: #fff;
+    font-size: 0.74rem;
+  }
+  .selected-row .title,
+  .picker-row .title {
+    font-weight: 800;
+    color: var(--ink);
+    line-height: 1.25;
+  }
+  .selected-row .meta,
+  .picker-row .meta {
+    color: var(--muted);
+    font-size: 0.68rem;
+    margin-top: 0.12rem;
+  }
+  .picker-row input {
+    width: auto;
+    margin: 0;
+    accent-color: var(--sa-cyan);
+  }
+  .presentation-filter {
+    margin-bottom: 0.55rem;
+  }
+  .presentation-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background:
+      radial-gradient(circle at 88% 14%, rgba(0, 174, 199, 0.14), transparent 24rem),
+      radial-gradient(circle at 12% 88%, rgba(32, 216, 163, 0.12), transparent 18rem),
+      #f8fbfd;
+    color: var(--ink);
+    padding: clamp(5rem, 7vh, 6rem) clamp(1.2rem, 3vw, 2.6rem) clamp(5.5rem, 9vh, 6.5rem);
+    overflow: auto;
+  }
+  .presentation-overlay.open {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .presentation-top,
+  .presentation-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  .presentation-top {
+    position: fixed;
+    top: clamp(0.9rem, 2.5vh, 1.6rem);
+    left: clamp(1rem, 3vw, 2rem);
+    right: clamp(1rem, 3vw, 2rem);
+    z-index: 9998;
+    pointer-events: none;
+  }
+  .presentation-top > * {
+    pointer-events: auto;
+  }
+  .presentation-footer {
+    position: fixed;
+    left: clamp(1rem, 3vw, 2rem);
+    right: clamp(1rem, 3vw, 2rem);
+    bottom: clamp(0.9rem, 2.5vh, 1.6rem);
+    z-index: 9999;
+    pointer-events: none;
+  }
+  .presentation-footer > * {
+    pointer-events: auto;
+  }
+  .presentation-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.58rem;
+    color: var(--sa-blue-dark);
+    font-weight: 900;
+    letter-spacing: 0.02em;
+  }
+  .presentation-slide-count {
+    color: var(--muted);
+    font-weight: 800;
+    font-size: 0.9rem;
+  }
+  .presentation-slide {
+    align-self: start;
+    max-width: 1680px;
+    width: 100%;
+    margin: 0 auto;
+    min-height: calc(100vh - clamp(11rem, 18vh, 13.5rem));
+    overflow: visible;
+    overscroll-behavior: contain;
+    background: rgba(255,255,255,0.94);
+    border: 1px solid rgba(214,222,232,0.92);
+    border-radius: 18px;
+    box-shadow: 0 28px 80px rgba(0,62,126,0.16);
+    padding: clamp(1.2rem, 3vw, 2.4rem);
+  }
+  .presentation-splash {
+    min-height: min(68vh, 720px);
+    display: grid;
+    place-items: center;
+    text-align: center;
+    background: #fff;
+    border-radius: 14px;
+    position: relative;
+    overflow: hidden;
+  }
+  .presentation-splash::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 8px;
+    background: linear-gradient(90deg, var(--sa-blue), var(--sami-mint-mid), #111827);
+  }
+  .presentation-wall-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 0.8rem;
+  }
+  .presentation-wall-head h2 {
+    color: var(--sa-blue-dark);
+    font-size: clamp(1.45rem, 2.5vw, 2.3rem);
+    line-height: 1.05;
+    margin-bottom: 0.25rem;
+  }
+  .presentation-status-line {
+    color: var(--charcoal);
+    font-size: 0.82rem;
+    line-height: 1.45;
+  }
+  .presentation-density {
+    font-size: 0.72rem;
+    font-weight: 850;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.24rem 0.52rem;
+    white-space: nowrap;
+  }
+  .presentation-board {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(230px, 1fr));
+    gap: 0.75rem;
+  }
+  .presentation-col {
+    background: rgba(248,250,252,0.78);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 0.55rem;
+    min-width: 0;
+  }
+  .presentation-col h3 {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.76rem;
+    color: var(--sa-blue-dark);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.55rem;
+    font-family: "Courier New", ui-monospace, monospace;
+  }
+  .presentation-card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--line);
+    border-radius: 8px;
+    padding: 0.58rem;
+    margin-bottom: 0.45rem;
+    box-shadow: 0 4px 12px rgba(17,24,39,0.05);
+    overflow-wrap: anywhere;
+  }
+  .presentation-card.s-blocked { border-left-color: var(--blocked); }
+  .presentation-card.s-backlog { border-left-color: var(--ready); }
+  .presentation-card.s-running { border-left-color: var(--running); }
+  .presentation-card.s-done { border-left-color: var(--done); }
+  .presentation-card-title {
+    color: var(--ink);
+    font-weight: 900;
+    line-height: 1.22;
+    font-size: calc(0.82rem * var(--presentation-density, 1));
+    margin-bottom: 0.38rem;
+  }
+  .presentation-card-grid {
+    display: grid;
+    gap: 0.28rem;
+    color: var(--charcoal);
+    font-size: calc(0.7rem * var(--presentation-density, 1));
+    line-height: 1.34;
+  }
+  .presentation-card-grid b {
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.62rem;
+    margin-right: 0.18rem;
+  }
+  .presentation-stage {
+    min-height: min(58vh, 620px);
+    display: grid;
+    place-items: center;
+    text-align: center;
+    background:
+      radial-gradient(circle at 50% 26%, rgba(0, 174, 199, 0.13), transparent 18rem),
+      rgba(255,255,255,0.96);
+  }
+  .presentation-stage .splash-mark {
+    margin: 0 auto 1.3rem;
+    width: 5.4rem;
+    height: 5.4rem;
+  }
+  .presentation-stage .presentation-title {
+    margin-bottom: 0.45rem;
+  }
+  .presentation-stage-subtitle {
+    color: var(--charcoal);
+    font-size: clamp(1rem, 1.8vw, 1.35rem);
+    margin-bottom: 1rem;
+  }
+  .presentation-stage-note {
+    display: inline-block;
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border: 1px solid rgba(0, 118, 142, 0.18);
+    border-radius: 999px;
+    padding: 0.42rem 0.75rem;
+    background: rgba(232, 251, 255, 0.7);
+  }
+  .presentation-kicker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-bottom: 0.9rem;
+  }
+  .presentation-title {
+    font-size: clamp(2rem, 4.2vw, 4.2rem);
+    line-height: 1.04;
+    color: var(--sa-blue-dark);
+    margin-bottom: 1.1rem;
+    font-weight: 900;
+  }
+  .presentation-main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.9rem;
+    margin-bottom: 1rem;
+  }
+  .presentation-block,
+  .presentation-detail {
+    border: 1px solid rgba(214,222,232,0.92);
+    border-radius: 12px;
+    background: rgba(248,250,252,0.86);
+    padding: 0.9rem;
+  }
+  .presentation-block b,
+  .presentation-detail b {
+    display: block;
+    color: var(--sa-blue-dark);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-bottom: 0.36rem;
+  }
+  .presentation-block span {
+    display: block;
+    font-size: clamp(1.05rem, 2vw, 1.55rem);
+    line-height: 1.35;
+  }
+  .presentation-details {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.65rem;
+  }
+  .presentation-detail span {
+    color: var(--charcoal);
+    font-size: 0.9rem;
+    line-height: 1.35;
+  }
+  .presentation-message {
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+  .presentation-controls {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+    position: relative;
+    justify-content: flex-end;
+    background: rgba(255,255,255,0.92);
+    border: 1px solid rgba(214,222,232,0.92);
+    border-radius: 12px;
+    box-shadow: 0 14px 42px rgba(17,24,39,0.14);
+    padding: 0.42rem;
+    backdrop-filter: blur(8px);
+  }
+  .presentation-help-wrap {
+    position: relative;
+  }
+  .presentation-help-btn {
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border-radius: 50%;
+    font-weight: 900;
+    color: var(--sa-blue-dark);
+  }
+  .presentation-help-popover {
+    display: none;
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 0.55rem);
+    width: min(280px, 82vw);
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 18px 48px rgba(17,24,39,0.18);
+    padding: 0.75rem;
+    color: var(--charcoal);
+    font-size: 0.78rem;
+    z-index: 42;
+  }
+  .presentation-help-popover.open {
+    display: block;
+  }
+  .presentation-help-popover b {
+    display: block;
+    color: var(--sa-blue-dark);
+    margin-bottom: 0.4rem;
+  }
+  .presentation-help-popover div {
+    margin-top: 0.24rem;
+  }
+  body.presentation-active {
+    overflow: hidden;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .splash, .splash-mark { transition: none; animation: none; }
+  }
+  @media (max-width: 1200px) {
+    .board { grid-template-columns: repeat(2, minmax(260px, 1fr)); }
+    .stats, .health-summary { grid-template-columns: repeat(3, 1fr); }
+    .health-grid { grid-template-columns: repeat(2, minmax(180px, 1fr)); }
+    .presentation-board { grid-template-columns: repeat(2, minmax(230px, 1fr)); }
+    .presentation-details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 700px) {
+    body { padding: 0.75rem; }
+    .brand img { max-width: 100%; height: auto; }
+    .brand { align-items: flex-start; flex-direction: column; }
+    .board { grid-template-columns: 1fr; }
+    .stats, .health-summary { grid-template-columns: repeat(2, 1fr); }
+    .header { align-items: flex-start; }
+    .header-right, .sync-indicator { width: 100%; }
+    .sync-indicator { min-width: 0; }
+    .health-grid, .form-grid, .review-fields { grid-template-columns: 1fr; }
+    .presentation-layout, .presentation-main, .presentation-details, .presentation-board { grid-template-columns: 1fr; }
+    .presentation-overlay {
+      padding: 5.4rem 0.75rem 7.6rem;
+    }
+    .presentation-slide {
+      max-height: calc(100vh - 13rem);
+    }
+    .presentation-top {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .presentation-footer {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 0.45rem;
+    }
+    .presentation-controls {
+      width: 100%;
+      justify-content: flex-end;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="splash" id="splash" aria-live="polite">
+  <div class="splash-card">
+    <div class="splash-accent"></div>
+    <div class="splash-body">
+      <div class="splash-mark" aria-hidden="true"></div>
+      <div>
+        <h1>SAMI Project Portfolio</h1>
+        <div class="subtitle">South Australia Medical Imaging · Active Kanban</div>
+        <div class="splash-status" id="splashStatus">Loading project portfolio…</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="topbar">
+  <div class="brand-strip"></div>
+  <div class="header">
+    <div class="brand">
+      <img src="assets/sami-gosa-logo.jpg" alt="Government of South Australia / South Australia Medical Imaging">
+      <div class="title-block">
+        <h1>SAMI Project Portfolio</h1>
+        <div class="subtitle">South Australia Medical Imaging · Active Kanban</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="sync-indicator" id="syncIndicator" role="status" aria-live="polite">
+        <span class="sync-dot" aria-hidden="true"></span>
+        <span class="sync-copy"><span class="sync-label" id="syncLabel">Checking Team ESMI…</span><span class="sync-meta" id="syncMeta">Connecting to the canonical source</span></span>
+        <span class="sync-clock" id="syncClock">--:--</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="notice" id="notice"></div>
+<div class="toolbar">
+  <button class="primary" id="addProjectBtn" data-edit-required hidden>Add Project</button>
+  <button class="primary" id="reviewBtn">Review Cards</button>
+  <button id="healthBtn">Card Health</button>
+  <button id="presentationBtn" class="presentation-btn"><span class="presentation-icon" aria-hidden="true"></span><span>Presentation Mode</span></button>
+  <button id="unlockBtn">Unlock Editing</button>
+  <button id="lockBtn" style="display:none">Lock Editing</button>
+  <button id="reloadBtn">Reload</button>
+  <span class="edit-state" id="editState">Editing locked</span>
+</div>
+<section class="health-panel" id="healthPanel">
+  <div class="health-summary" id="healthSummary"></div>
+  <div class="health-grid" id="healthGrid"></div>
+</section>
+<section class="review-card" id="reviewCard"></section>
+<section class="summary-box" id="summaryBox">
+  <div class="toolbar">
+    <button id="copySummaryBtn">Copy Markdown summary</button>
+  </div>
+  <textarea id="summaryText" readonly></textarea>
+</section>
+<section class="overview-panel" id="overviewPanel">
+  <button class="overview-toggle" id="overviewToggle" type="button" aria-expanded="false" aria-controls="stats">
+    <span class="overview-icon" aria-hidden="true"></span>
+    <span>Board Overview</span>
+    <span class="overview-chevron" aria-hidden="true"></span>
+  </button>
+  <div class="stats" id="stats"></div>
+</section>
+<section class="recent-strip" id="recentStrip" aria-label="Recently Updated"></section>
+<div class="board" id="board"><div class="error">Loading project data…</div></div>
+
+<section class="project-modal" id="projectModal" role="dialog" aria-modal="true" aria-labelledby="projectModalTitle" hidden>
+  <div class="project-modal-card">
+    <div class="project-modal-head"><div><h2 id="projectModalTitle">Add Project</h2><div class="subtle">Create one project or preview a spreadsheet import before saving.</div></div><button id="closeProjectModalBtn" type="button">Close</button></div>
+    <div class="project-mode-tabs"><button id="singleProjectTab" class="active" type="button">Single Project</button><button id="bulkProjectTab" type="button">Bulk Add</button></div>
+    <div class="single-panel" id="singleProjectPanel">
+      <div class="project-form-grid">
+        <div class="span-2"><label for="pTitle">Project name *</label><input id="pTitle" maxlength="200" autocomplete="off"></div>
+        <div><label for="pStatus">Status *</label><select id="pStatus"><option value="backlog">Backlog</option><option value="running">In Progress</option><option value="blocked">Blocked</option><option value="done">Done</option></select></div>
+        <div><label for="pLead">Lead</label><input id="pLead" maxlength="80" autocomplete="off"></div>
+        <div><label for="pRisk">Risk</label><select id="pRisk"><option value="green">Green</option><option value="amber">Amber</option><option value="red">Red</option></select></div>
+        <div><label for="pReviewDate">Review date</label><input id="pReviewDate" type="date"></div>
+        <div class="span-2"><label for="pCurrentStatus">Current status / summary</label><textarea id="pCurrentStatus"></textarea></div>
+        <div class="span-2"><label for="pNextAction">Next action</label><textarea id="pNextAction"></textarea></div>
+        <div class="span-2 project-checks"><label><input id="pFocusArea" type="checkbox"> Focus area</label><label><input id="pCreateFolder" type="checkbox" checked> Create project folder</label></div>
+        <div class="span-2 slug-preview">Project ID: <span id="projectSlugPreview">project</span></div>
+      </div>
+      <div class="form-error" id="singleProjectError" role="alert"></div>
+      <div class="drawer-actions"><button class="primary" id="saveNewProjectBtn" type="button">Save Project</button><button id="cancelNewProjectBtn" type="button">Cancel</button></div>
+    </div>
+    <div class="bulk-panel" id="bulkProjectPanel" hidden>
+      <label class="bulk-label" for="bulkProjectText">Paste CSV or spreadsheet data</label>
+      <textarea id="bulkProjectText" placeholder="title,status,lead,risk,currentStatus,nextAction,reviewDate,focusArea"></textarea>
+      <div class="project-checks"><label><input id="bulkCreateFolders" type="checkbox" checked> Create folders for imported projects</label></div>
+      <div class="form-error" id="bulkProjectError" role="alert"></div><div class="bulk-preview-wrap" id="bulkPreviewWrap"></div>
+      <div class="drawer-actions"><button id="previewBulkBtn" type="button">Preview</button><button class="primary" id="saveBulkBtn" type="button" disabled>Save Valid Rows</button><button id="cancelBulkBtn" type="button">Cancel</button></div>
+    </div>
+  </div>
+</section>
+
+<section class="presentation-panel" id="presentationPanel" role="dialog" aria-modal="true" aria-labelledby="presentationSetupTitle" hidden>
+  <div class="presentation-setup">
+    <h2 id="presentationSetupTitle">Presentation Mode</h2>
+    <div class="subtle">Select key cards for a read-only management presentation.</div>
+    <div class="toolbar">
+      <button id="selectVisibleBtn">Select Visible Cards</button>
+      <button id="clearPresentationBtn">Clear Selection</button>
+      <label class="presentation-filter" for="presentationFilter">Filter</label>
+      <select id="presentationFilter">
+        <option value="all">All cards</option>
+        <option value="blocked">Blocked</option>
+        <option value="backlog">Backlog</option>
+        <option value="running">In Progress</option>
+        <option value="done">Done</option>
+        <option value="needs">Needs Update</option>
+        <option value="focus">Focus Areas</option>
+      </select>
+    </div>
+    <div class="presentation-layout">
+      <div class="presentation-list">
+        <h3>Selected Cards (<span id="presentationCount">0</span>)</h3>
+        <div class="selected-list" id="selectedPresentationList"></div>
+      </div>
+      <div class="presentation-picker">
+        <h3>Available Cards</h3>
+        <div class="picker-list" id="presentationPicker"></div>
+      </div>
+    </div>
+    <div class="drawer-actions">
+      <button class="primary" id="launchPresentationBtn">Launch Presentation</button>
+      <button id="cancelPresentationBtn">Cancel</button>
+    </div>
+  </div>
+</section>
+
+<section class="presentation-overlay" id="presentationOverlay" aria-label="Presentation Mode">
+  <div class="presentation-top">
+    <div class="presentation-brand"><span class="presentation-icon" aria-hidden="true"></span><span>SAMI Project Portfolio</span></div>
+    <div class="presentation-slide-count" id="presentationSlideCount">Full board</div>
+  </div>
+  <div class="presentation-slide" id="presentationSlide"></div>
+  <div class="presentation-footer">
+    <div>
+      <div class="presentation-message" id="fullscreenMessage"></div>
+    </div>
+    <div class="presentation-controls">
+      <div class="presentation-help-wrap">
+        <button id="presentationHelpBtn" class="presentation-help-btn" title="Presentation controls" aria-label="Presentation controls" aria-expanded="false">?</button>
+        <div class="presentation-help-popover" id="presentationHelp" role="dialog" aria-label="Presentation controls">
+          <b>Presentation controls</b>
+          <div>Esc: Exit presentation</div>
+          <div>?: Show or hide this help</div>
+          <div>+ / - : Change density</div>
+          <div>F11 in Edge: Browser fullscreen if needed</div>
+        </div>
+      </div>
+      <button id="presentationPrevBtn" title="Decrease density">-</button>
+      <button class="primary" id="presentationNextBtn" title="Increase density">+</button>
+      <button id="presentationFullscreenBtn">Fullscreen</button>
+      <button id="presentationExitBtn">Exit Presentation</button>
+    </div>
+  </div>
+</section>
+
+<div class="drawer-backdrop" id="drawerBackdrop"></div>
+<aside class="drawer" id="drawer" aria-label="Card update drawer">
+  <h2 id="drawerTitle">Update card</h2>
+  <div class="drawer-subtitle" id="drawerSubtitle"></div>
+  <div class="form-grid">
+    <div>
+      <label for="fStatus">Status</label>
+      <select id="fStatus"></select>
+    </div>
+    <div>
+      <label for="fOwner">Owner</label>
+      <input id="fOwner" autocomplete="off">
+    </div>
+    <div>
+      <label for="fRisk">Risk</label>
+      <select id="fRisk">
+        <option value="green">Green</option>
+        <option value="amber">Amber</option>
+        <option value="red">Red</option>
+      </select>
+    </div>
+    <div class="span-2">
+      <label for="fNextAction">Next Action</label>
+      <textarea id="fNextAction"></textarea>
+    </div>
+    <div>
+      <label for="fWaitingOn">Waiting On</label>
+      <input id="fWaitingOn" autocomplete="off">
+    </div>
+    <div>
+      <label for="fReviewDate">Review Date</label>
+      <input id="fReviewDate" type="date">
+    </div>
+    <div class="span-2">
+      <label for="fBlocker">Blocker Reason</label>
+      <textarea id="fBlocker"></textarea>
+    </div>
+    <div class="span-2">
+      <label for="fEvidence">Evidence / Source</label>
+      <input id="fEvidence" autocomplete="off">
+    </div>
+    <div class="span-2">
+      <label for="fNotes">Notes</label>
+      <textarea id="fNotes"></textarea>
+    </div>
+    <div>
+      <label for="fCompletedDate">Completed Date</label>
+      <input id="fCompletedDate" type="date">
+    </div>
+    <div>
+      <label for="fCompletedOutcome">Completed Outcome</label>
+      <input id="fCompletedOutcome" autocomplete="off">
+    </div>
+  </div>
+  <section class="drawer-files" id="drawerFileDetails" aria-labelledby="drawerFileDetailsTitle" hidden>
+    <h3 id="drawerFileDetailsTitle">Files &amp; Documents</h3>
+    <div class="drawer-file-counts" id="drawerFileCounts"></div>
+    <div class="drawer-file-actions" id="drawerFileActions"></div>
+  </section>
+  <section class="drawer-activity" id="drawerActivity" aria-labelledby="drawerActivityTitle" hidden>
+    <h3 id="drawerActivityTitle">Activity Log</h3>
+    <div id="drawerActivityItems"></div>
+    <button class="activity-toggle" id="activityToggle" type="button" hidden>View full history</button>
+  </section>
+  <div class="drawer-actions">
+    <button class="primary" id="saveBtn">Save Update</button>
+    <button id="reviewedBtn">Reviewed Today</button>
+    <button class="danger" id="blockedBtn">Mark Blocked</button>
+    <button id="waitingBtn">Mark Waiting</button>
+    <button class="good" id="doneBtn">Mark Done</button>
+    <button id="cancelBtn">Cancel</button>
+  </div>
+</aside>
+
+<script>
+const COLS = [
+  { key: "blocked", label: "Blocked", cls: "col-blocked", icon: "⊘" },
+  { key: "ready",   label: "Ready",   cls: "col-ready",   icon: "▶" },
+  { key: "running", label: "In Progress", cls: "col-running", icon: "●" },
+  { key: "done",    label: "Done",    cls: "col-done",    icon: "✓" }
+];
+const DEFAULT_CONFIG = {
+  wipLimits: { "Blocked": 99, "Ready": 99, "In Progress": 10, "Done": 99 },
+  staleThresholdDays: 14,
+  blockedThresholdDays: 7,
+  editProtection: { enabled: true, sessionMinutes: 120 },
+  columnPolicies: {
+    "Blocked": "Blocked work must have a blocker reason or named waiting-on party.",
+    "Ready": "Ready work is a candidate for action or ownership.",
+    "In Progress": "Active work should have an owner, next action, review date, and recent update.",
+    "Done": "Done work should record an outcome or evidence source."
+  }
+};
+const STATUS_LABELS = { blocked: "Blocked", ready: "Ready", running: "In Progress", done: "Done" };
+const BACKLOG_DESCRIPTION = "Backlog work is not currently being worked on, including work not resourced, waiting its turn, or not yet prioritised.";
+const BACKLOG_ICON = (COLS.find(c => c.key === "ready") || {}).icon || ">";
+const BLOCKED_ICON = (COLS.find(c => c.key === "blocked") || {}).icon || "!";
+COLS.splice(
+  0,
+  COLS.length,
+  { key: "backlog", label: "Backlog", cls: "col-ready", icon: BACKLOG_ICON },
+  { key: "running", label: "In Progress", cls: "col-running", icon: (COLS.find(c => c.key === "running") || {}).icon || "*" },
+  { key: "blocked", label: "Blocked", cls: "col-blocked", icon: BLOCKED_ICON },
+  { key: "done", label: "Done", cls: "col-done", icon: (COLS.find(c => c.key === "done") || {}).icon || "Done" }
+);
+DEFAULT_CONFIG.wipLimits.Backlog = DEFAULT_CONFIG.wipLimits.Ready || 99;
+DEFAULT_CONFIG.columnPolicies.Backlog = BACKLOG_DESCRIPTION;
+DEFAULT_CONFIG.columnPolicies.Ready = BACKLOG_DESCRIPTION;
+STATUS_LABELS.backlog = "Backlog";
+STATUS_LABELS.ready = "Backlog";
+const STORAGE_USER_KEY = "samiKanbanUpdatedBy";
+const EDIT_TOKEN_KEY = "samiKanbanEditToken";
+const EDIT_EXPIRES_KEY = "samiKanbanEditExpires";
+const OVERVIEW_STORAGE_KEY = "samiBoardOverviewOpen";
+const PRESENTATION_STORAGE_KEY = "samiPresentationCardIds";
+const SYNC_POLL_MS = 20000;
+let appState = {
+  payload: null,
+  projects: [],
+  meta: {},
+  config: DEFAULT_CONFIG,
+  auditUpdates: {},
+  folderStatuses: {},
+  projectFileIndex: null,
+  cardActivityIndex: null,
+  auditActivities: [],
+  activityExpanded: {},
+  detailsCardId: "",
+  detailsActivityExpanded: {},
+  cardActivityLoadPromise: null,
+  bulkRows: [],
+  recentFilter: false,
+  editingIndex: -1,
+  reviewQueue: [],
+  reviewIndex: 0,
+  reviewStats: null,
+  editingUnlocked: false,
+  editToken: "",
+  presentationIds: [],
+  presentationIndex: 0,
+  presentationDensity: 1,
+  sync: { projectsRevision: "", auditRevision: "", pending: null, polling: false, timer: null, lastStatus: null, lastCheckedAt: null, lastError: "", clockTimer: null }
+};
+let splashReady = false;
+let splashCanDismiss = false;
+
+function esc(s) {
+  return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+function attr(s) { return esc(s).replace(/"/g,"&quot;"); }
+function todayDate() { return new Date().toLocaleDateString("en-CA"); }
+function nowStamp() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate()) + "T" +
+    pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+}
+function normalizeStatus(status) {
+  return status === "ready" ? "backlog" : (status || "backlog");
+}
+function slugifyProjectName(value) {
+  return String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80).replace(/-+$/g, "");
+}
+function collectProjectIds() {
+  const used = new Set();
+  appState.projects.forEach(card => {
+    if (card.id) used.add(String(card.id).toLowerCase());
+    const folder = folderMetadata(card);
+    if (folder) used.add(folder.relativePath.slice("project_files/".length).toLowerCase());
+  });
+  return used;
+}
+function uniqueProjectId(title, reserved) {
+  const used = reserved || collectProjectIds();
+  const base = slugifyProjectName(title) || "project";
+  let id = base, suffix = 2;
+  while (used.has(id)) id = base.slice(0, Math.max(1, 79 - String(suffix).length)).replace(/-+$/g, "") + "-" + suffix++;
+  used.add(id); return id;
+}
+function folderMetadata(card) {
+  const folder = card && card.folder;
+  return folder && folder.enabled === true && /^project_files\/[a-z0-9]+(?:-[a-z0-9]+)*$/.test(String(folder.relativePath || "")) ? folder : null;
+}
+function projectFileEntries() {
+  const cards = appState.projectFileIndex && appState.projectFileIndex.cards;
+  if (Array.isArray(cards)) return cards.filter(entry => entry && typeof entry === "object");
+  return cards && typeof cards === "object" ? Object.values(cards).filter(entry => entry && typeof entry === "object") : [];
+}
+function projectFileEntry(card) {
+  if (!card || !appState.projectFileIndex) return null;
+  const cards = appState.projectFileIndex.cards;
+  if (cards && !Array.isArray(cards) && card.id && cards[card.id] && typeof cards[card.id] === "object") return cards[card.id];
+  const entries = projectFileEntries();
+  const idMatches = entries.filter(entry => entry.cardId && String(entry.cardId) === String(card.id));
+  if (idMatches.length === 1) return idMatches[0];
+  const folder = folderMetadata(card);
+  if (folder) {
+    const folderMatches = entries.filter(entry => String(entry.folderRelativePath || "").toLowerCase() === folder.relativePath.toLowerCase());
+    if (folderMatches.length === 1) return folderMatches[0];
+  }
+  const title = String(card.title || "").trim().toLowerCase();
+  if (!title) return null;
+  const titleMatches = entries.filter(entry => String(entry.title || "").trim().toLowerCase() === title);
+  return titleMatches.length === 1 ? titleMatches[0] : null;
+}
+function fileIndexCount(entry, field) {
+  const value = Number(entry && entry[field]);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+function fileBadgeMarkup(card) {
+  const entry = projectFileEntry(card);
+  if (!entry) return "";
+  const total = fileIndexCount(entry, "fileCount");
+  const review = fileIndexCount(entry, "needsReviewCount");
+  return '<span class="badge file-count">📎 ' + total + ' files</span>' +
+    (review ? ' <span class="badge file-review">⚠ ' + review + ' review</span>' : '');
+}
+function refreshProjectFileVisibility() {
+  appState.projects.forEach(card => {
+    const target = document.querySelector('[data-file-visibility-for="' + CSS.escape(card.id) + '"]');
+    if (target) target.innerHTML = fileBadgeMarkup(card);
+  });
+  if (appState.editingIndex >= 0) renderDrawerFileDetails(appState.projects[appState.editingIndex]);
+  refreshOpenCardDetails();
+}
+async function loadProjectFileIndex() {
+  try {
+    const response = await fetch("data/project_file_index.json?ts=" + Date.now(), { cache: "no-store" });
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    const payload = await response.json();
+    if (!payload || typeof payload !== "object" || !payload.cards || (typeof payload.cards !== "object" && !Array.isArray(payload.cards))) {
+      throw new Error("invalid project file index schema");
+    }
+    appState.projectFileIndex = payload;
+    refreshProjectFileVisibility();
+  } catch (err) {
+    appState.projectFileIndex = null;
+    console.warn("Project file index unavailable; file details are hidden.", err);
+  }
+}
+const ACTIVITY_FIELD_META = {
+  status: ["status_changed", "Status changed"], riskColour: ["risk_changed", "Risk changed"],
+  projectLead: ["lead_changed", "Lead changed"], owner: ["lead_changed", "Owner changed"],
+  reviewDate: ["review_date_changed", "Review date changed"], nextAction: ["next_action_changed", "Next action changed"],
+  context: ["current_state_changed", "Current state changed"], notes: ["notes_updated", "Notes updated"]
+};
+const ACTIVITY_ACTION_META = {
+  "project.created": ["card_created", "Card created"], "project.folder_created": ["folder_linked", "Project folder created"],
+  "project.folder_linked": ["folder_linked", "Folder linked"], change_project_lead: ["lead_changed", "Lead changed"],
+  reviewed_no_change: ["manual_update", "Card reviewed"], mark_blocked: ["status_changed", "Card marked blocked"],
+  mark_waiting: ["status_changed", "Card marked waiting"], mark_done: ["status_changed", "Card marked done"],
+  save_update: ["manual_update", "Card updated"]
+};
+function cardActivityEntry(card) {
+  const cards = appState.cardActivityIndex && appState.cardActivityIndex.cards;
+  if (!card || !cards || typeof cards !== "object") return null;
+  if (!Array.isArray(cards) && cards[card.id] && typeof cards[card.id] === "object") return cards[card.id];
+  const entries = (Array.isArray(cards) ? cards : Object.values(cards)).filter(item => item && typeof item === "object");
+  const idMatches = entries.filter(item => String(item.cardId || "") === String(card.id || ""));
+  if (idMatches.length === 1) return idMatches[0];
+  const title = String(card.title || "").trim().toLowerCase();
+  const titleMatches = entries.filter(item => String(item.title || "").trim().toLowerCase() === title);
+  return title && titleMatches.length === 1 ? titleMatches[0] : null;
+}
+function safeActivityValue(value) {
+  const text = value === null || value === undefined ? "" : (typeof value === "object" ? JSON.stringify(value) : String(value));
+  return /robyn/i.test(text) ? "" : text;
+}
+function normalizeActivityEvent(event) {
+  if (!event || typeof event !== "object") return null;
+  const before = event.before && typeof event.before === "object" ? event.before : {};
+  const after = event.after && typeof event.after === "object" ? event.after : {};
+  const supplied = event.changes && typeof event.changes === "object" ? event.changes : {};
+  const changes = {};
+  new Set(Object.keys(before).concat(Object.keys(after))).forEach(field => {
+    if (["lastUpdated","updatedBy","next"].includes(field)) return;
+    if (JSON.stringify(before[field]) !== JSON.stringify(after[field])) changes[field] = { old:before[field], new:after[field] };
+  });
+  Object.keys(supplied).forEach(field => {
+    const change = supplied[field];
+    if (change && typeof change === "object" && JSON.stringify(change.old) !== JSON.stringify(change.new)) changes[field] = { old:change.old, new:change.new };
+  });
+  const meaningful = Object.keys(changes).filter(field => ACTIVITY_FIELD_META[field]);
+  let type = String(event.type || ""), summary = String(event.summary || "");
+  if (!type || !summary) {
+    const meta = meaningful.length === 1 ? ACTIVITY_FIELD_META[meaningful[0]] : (ACTIVITY_ACTION_META[event.action] || ["manual_update", "Card updated"]);
+    type = type || meta[0]; summary = summary || meta[1];
+  }
+  const details = event.details && typeof event.details === "object" ? Object.assign({}, event.details) : {};
+  if (meaningful.length === 1 && !details.field) {
+    const field = meaningful[0], oldValue = safeActivityValue(changes[field].old), newValue = safeActivityValue(changes[field].new);
+    details.field = field;
+    if (field !== "notes" && oldValue && newValue) { details.oldValue = oldValue; details.newValue = newValue; }
+  }
+  if (/robyn/i.test(String(details.oldValue || "") + " " + String(details.newValue || ""))) {
+    delete details.oldValue; delete details.newValue;
+  }
+  return { id:String(event.id || ""), cardId:String(event.cardId || ""), cardTitle:String(event.cardTitle || ""),
+    timestamp:String(event.timestamp || ""), type:type || "manual_update", summary:summary || "Card updated",
+    details:details, actor:String(event.actor || event.updatedBy || "unknown"), source:String(event.source || "card_updates.jsonl") };
+}
+function rememberActivityEvent(event) {
+  const item = normalizeActivityEvent(event);
+  if (!item || (!item.cardId && !item.cardTitle) || !item.timestamp) return;
+  appState.auditActivities.push(item);
+}
+function activityItemsFor(card) {
+  const indexed = cardActivityEntry(card);
+  const items = indexed && Array.isArray(indexed.items) ? indexed.items.map(normalizeActivityEvent).filter(Boolean) : [];
+  appState.auditActivities.forEach(item => {
+    if ((item.cardId && item.cardId === card.id) || (!item.cardId && item.cardTitle.trim().toLowerCase() === String(card.title || "").trim().toLowerCase())) items.push(item);
+  });
+  const unique = new Map();
+  items.forEach(item => {
+    const key = [item.timestamp,item.type,item.summary,item.actor].join("|");
+    if (!unique.has(key) || item.id) unique.set(key, item);
+  });
+  return Array.from(unique.values()).sort((a,b) => String(b.timestamp).localeCompare(String(a.timestamp))).slice(0, 20);
+}
+function formatActivityStamp(value, compact) {
+  const date = toDate(value);
+  if (!date) return "";
+  return date.toLocaleString("en-AU", compact ? { day:"2-digit", month:"2-digit" } : { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" });
+}
+function activityLineMarkup(card) {
+  const item = activityItemsFor(card)[0];
+  return item ? "Updated " + esc(formatActivityStamp(item.timestamp, true)) + " · " + esc(item.summary) : "";
+}
+function refreshCardActivityVisibility() {
+  appState.projects.forEach(card => {
+    const target = document.querySelector('[data-card-activity-for="' + CSS.escape(card.id) + '"]');
+    if (target) target.innerHTML = activityLineMarkup(card);
+  });
+  if (appState.editingIndex >= 0) renderDrawerActivity(appState.projects[appState.editingIndex]);
+  refreshOpenCardDetails();
+}
+async function loadCardActivityIndex() {
+  try {
+    const response = await fetch("data/card_activity_index.json?ts=" + Date.now(), { cache:"no-store" });
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    const payload = await response.json();
+    if (!payload || typeof payload !== "object" || !payload.cards || typeof payload.cards !== "object") throw new Error("invalid card activity index schema");
+    appState.cardActivityIndex = payload;
+    refreshCardActivityVisibility();
+  } catch (err) {
+    appState.cardActivityIndex = null;
+    console.warn("Card activity index unavailable; indexed history is hidden.", err);
+  }
+}
+function parseJsonObjectStream(text) {
+  const objects = [];
+  let start = -1, depth = 0, quoted = false, escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') { quoted = true; continue; }
+    if (char === "{") { if (depth === 0) start = i; depth++; }
+    else if (char === "}" && depth > 0) {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        try { objects.push(JSON.parse(text.slice(start, i + 1))); } catch (_) {}
+        start = -1;
+      }
+    }
+  }
+  return objects;
+}
+function activityItemsMarkup(items, limit) {
+  return items.slice(0, limit).map(item => {
+    const details = item.details || {};
+    const oldValue = safeActivityValue(details.oldValue), newValue = safeActivityValue(details.newValue);
+    const change = oldValue && newValue ? '<div class="activity-change">' + esc(oldValue) + ' → ' + esc(newValue) + '</div>' : '';
+    return '<div class="activity-item"><div class="activity-item-head"><b>' + esc(item.summary) + '</b><time>' + esc(formatActivityStamp(item.timestamp, false)) + '</time></div>' + change + '</div>';
+  }).join("");
+}
+function cardDetailsMarkup(card) {
+  const fileEntry = projectFileEntry(card);
+  const activities = activityItemsFor(card);
+  const lead = leadFor(card) || "Unassigned";
+  const updated = formatActivityStamp(getCardUpdatedAt(card), false) || "Not recorded";
+  const risk = String(card.riskColour || "Not recorded");
+  let html = '<section class="details-section"><h4>At a Glance</h4><div class="details-glance">' +
+    '<div class="details-field"><span>Status</span><b>' + esc(STATUS_LABELS[normalizeStatus(card.status)] || card.status || "Not recorded") + '</b></div>' +
+    '<div class="details-field"><span>Risk</span><b>' + esc(risk.charAt(0).toUpperCase() + risk.slice(1)) + '</b></div>' +
+    '<div class="details-field"><span>Lead</span><b>' + esc(lead) + '</b></div>' +
+    '<div class="details-field"><span>Review date</span><b>' + esc(card.reviewDate || "Not recorded") + '</b></div>' +
+    '<div class="details-field wide"><span>Last updated</span><b>' + esc(updated) + '</b></div>' +
+    '<div class="details-field wide"><span>Current state</span><b>' + esc(card.context || "Not recorded") + '</b></div>' +
+    '<div class="details-field wide"><span>Next action</span><b>' + esc(card.nextAction || "Not recorded") + '</b></div>' +
+    '</div>';
+  if (card.notes) html += '<details class="details-notes"><summary>Show notes</summary><div>' + esc(card.notes) + '</div></details>';
+  html += '</section>';
+  if (fileEntry) {
+    const fileFields = [["Total", "fileCount"], ["Admin", "adminCount"], ["Planning", "planningCount"], ["Delivery", "deliveryCount"],
+      ["Meetings", "meetingsCount"], ["Risks / Issues / Decisions", "risksIssuesDecisionsCount"], ["Evidence", "evidenceCount"], ["Closeout", "closeoutCount"]];
+    if (fileIndexCount(fileEntry, "needsReviewCount") > 0) fileFields.push(["Needs review", "needsReviewCount"]);
+    const sortedAt = toDate(fileEntry.lastFileSort);
+    html += '<section class="details-section"><h4>Files &amp; Documents</h4><div class="details-counts">' +
+      fileFields.map(item => '<span class="details-count">' + item[0] + ': <b>' + fileIndexCount(fileEntry, item[1]) + '</b></span>').join("") + '</div>' +
+      '<div class="details-actions">' +
+      (sortedAt ? '<span class="card-activity-line">Sorted ' + esc(sortedAt.toLocaleDateString("en-AU")) + '</span>' : '<span></span>') +
+      (folderMetadata(card) ? '<button class="folder-action" type="button" data-folder="' + attr(card.id) + '">Open project folder</button>' : '') +
+      '</div></section>';
+  }
+  if (activities.length) {
+    const expanded = !!appState.detailsActivityExpanded[card.id];
+    html += '<section class="details-section"><h4>Activity Log</h4>' + activityItemsMarkup(activities, expanded ? 20 : 5) +
+      (activities.length > 5 ? '<button class="details-activity-toggle" type="button" data-details-activity-toggle="' + attr(card.id) + '">' + (expanded ? 'Show less' : 'Show more') + '</button>' : '') +
+      '</section>';
+  }
+  return html;
+}
+function setCardDetailsOpen(id, open) {
+  const previousId = appState.detailsCardId;
+  if (previousId) {
+    const previousPanel = document.querySelector('[data-details-panel-for="' + CSS.escape(previousId) + '"]');
+    const previousButton = document.querySelector('[data-details="' + CSS.escape(previousId) + '"]');
+    if (previousPanel) previousPanel.hidden = true;
+    if (previousButton) previousButton.setAttribute("aria-expanded", "false");
+  }
+  appState.detailsCardId = open ? id : "";
+  if (!open) return;
+  const index = cardById(id);
+  const panel = document.querySelector('[data-details-panel-for="' + CSS.escape(id) + '"]');
+  const button = document.querySelector('[data-details="' + CSS.escape(id) + '"]');
+  if (index < 0 || !panel || !button) { appState.detailsCardId = ""; return; }
+  panel.innerHTML = cardDetailsMarkup(appState.projects[index]);
+  panel.hidden = false;
+  button.setAttribute("aria-expanded", "true");
+}
+function toggleCardDetails(id) {
+  setCardDetailsOpen(id, appState.detailsCardId !== id);
+}
+function closeCardDetails() {
+  if (appState.detailsCardId) setCardDetailsOpen(appState.detailsCardId, false);
+}
+function refreshOpenCardDetails() {
+  if (!appState.detailsCardId) return;
+  const id = appState.detailsCardId;
+  appState.detailsCardId = "";
+  setCardDetailsOpen(id, true);
+}
+function projectModalOpen() { const modal = document.getElementById("projectModal"); return !!(modal && modal.classList.contains("open")); }
+function resetProjectForm() {
+  ["pTitle","pLead","pCurrentStatus","pNextAction"].forEach(id => document.getElementById(id).value = "");
+  document.getElementById("pStatus").value = "backlog"; document.getElementById("pRisk").value = "green"; document.getElementById("pReviewDate").value = "";
+  document.getElementById("pFocusArea").checked = false; document.getElementById("pCreateFolder").checked = true;
+  document.getElementById("singleProjectError").textContent = ""; document.getElementById("projectSlugPreview").textContent = "project";
+}
+function setProjectMode(mode) {
+  const bulk = mode === "bulk";
+  document.getElementById("singleProjectPanel").hidden = bulk; document.getElementById("bulkProjectPanel").hidden = !bulk;
+  document.getElementById("singleProjectTab").classList.toggle("active", !bulk); document.getElementById("bulkProjectTab").classList.toggle("active", bulk);
+}
+function openProjectModal() {
+  if (!requireUnlocked()) return; resetProjectForm(); setProjectMode("single");
+  const modal = document.getElementById("projectModal"); modal.hidden = false; modal.classList.add("open");
+  setTimeout(() => document.getElementById("pTitle").focus(), 0);
+}
+function closeProjectModal() {
+  const modal = document.getElementById("projectModal"); modal.classList.remove("open"); modal.hidden = true;
+  setTimeout(() => { if (!isEditingActive()) applyPendingSync().catch(err => showNotice("Sync refresh failed: " + err.message, "error")); }, 0);
+}
+function normalizeImportedStatus(value) {
+  const key = String(value || "").trim().toLowerCase().replace(/[ _-]+/g, "");
+  return ({ backlog:"backlog", ready:"backlog", inprogress:"running", running:"running", active:"running", blocked:"blocked", done:"done", complete:"done", completed:"done" })[key] || "";
+}
+function parseBoolean(value) { return /^(1|true|yes|y|focus|checked)$/i.test(String(value || "").trim()); }
+function parseDelimitedRow(line, delimiter) {
+  const cells = []; let value = "", quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') { if (quoted && line[i + 1] === '"') { value += '"'; i++; } else quoted = !quoted; }
+    else if (ch === delimiter && !quoted) { cells.push(value.trim()); value = ""; } else value += ch;
+  }
+  cells.push(value.trim()); return cells;
+}
+function parseBulkProjects(text) {
+  const lines = String(text || "").split(/\r?\n/).filter(line => line.trim());
+  if (!lines.length) return [];
+  const delimiter = lines[0].includes("\t") ? "\t" : ",";
+  const aliases = { title:"title", project:"title", projectname:"title", name:"title", status:"status", lead:"lead", owner:"lead", risk:"risk", currentstatus:"currentStatus", summary:"currentStatus", nextaction:"nextAction", next:"nextAction", reviewdate:"reviewDate", focusarea:"focusArea" };
+  const header = parseDelimitedRow(lines[0], delimiter).map(h => aliases[h.toLowerCase().replace(/[ _-]+/g, "")] || "");
+  if (header.indexOf("title") < 0 || header.indexOf("status") < 0) return [{ rowNumber:1, errors:["Header must include title and status."], valid:false }];
+  const existingNames = new Set(appState.projects.map(t => String(t.title || "").trim().toLowerCase()));
+  const batchNames = new Set(), reserved = collectProjectIds();
+  return lines.slice(1).map((line, index) => {
+    const cells = parseDelimitedRow(line, delimiter), entry = {};
+    header.forEach((name, i) => { if (name) entry[name] = cells[i] || ""; });
+    entry.title = String(entry.title || "").trim(); entry.status = normalizeImportedStatus(entry.status); entry.risk = String(entry.risk || "green").trim().toLowerCase();
+    entry.lead = String(entry.lead || "").trim(); entry.currentStatus = String(entry.currentStatus || "").trim(); entry.nextAction = String(entry.nextAction || "").trim();
+    entry.reviewDate = String(entry.reviewDate || "").trim(); entry.focusArea = parseBoolean(entry.focusArea);
+    const errors = [], nameKey = entry.title.toLowerCase();
+    if (!entry.title) errors.push("Project name is required.");
+    if (!entry.status) errors.push("Status must be Backlog, In Progress, Blocked or Done.");
+    if (!["green","amber","red"].includes(entry.risk)) errors.push("Risk must be green, amber or red.");
+    if (entry.reviewDate && !/^\d{4}-\d{2}-\d{2}$/.test(entry.reviewDate)) errors.push("Review date must be YYYY-MM-DD.");
+    if (nameKey && (existingNames.has(nameKey) || batchNames.has(nameKey))) errors.push("Duplicate project name.");
+    if (nameKey) batchNames.add(nameKey);
+    entry.id = entry.title ? uniqueProjectId(entry.title, reserved) : "";
+    return { rowNumber:index + 2, entry:entry, errors:errors, valid:errors.length === 0 };
+  });
+}
+function renderBulkPreview() {
+  const rows = appState.bulkRows || [], validCount = rows.filter(r => r.valid).length;
+  document.getElementById("saveBulkBtn").disabled = validCount === 0;
+  document.getElementById("bulkProjectError").textContent = rows.length ? validCount + " valid row(s); " + (rows.length - validCount) + " invalid row(s)." : "Paste data to preview.";
+  document.getElementById("bulkPreviewWrap").innerHTML = rows.length ? '<table class="bulk-preview"><thead><tr><th>Row</th><th>Project</th><th>Status</th><th>ID</th><th>Validation</th></tr></thead><tbody>' +
+    rows.map(r => '<tr class="' + (r.valid ? '' : 'invalid') + '"><td>' + r.rowNumber + '</td><td>' + esc(r.entry ? r.entry.title : '') + '</td><td>' + esc(r.entry ? STATUS_LABELS[r.entry.status] || '' : '') + '</td><td>' + esc(r.entry ? r.entry.id : '') + '</td><td>' + esc(r.errors.length ? r.errors.join(" ") : "Ready") + '</td></tr>').join("") + '</tbody></table>' : "";
+}
+function newProjectCard(entry) {
+  const stamp = nowStamp();
+  return { title:entry.title, status:entry.status, context:entry.currentStatus || "", next:entry.nextAction || "", people:[], id:entry.id, owner:entry.lead || "", projectLead:entry.lead || "", nextAction:entry.nextAction || "", reviewDate:entry.reviewDate || "", lastUpdated:stamp, updatedBy:getUpdatedBy(), riskColour:entry.risk || "green", priority:"medium", blockerReason:"", waitingOn:"", evidenceSource:"", notes:"", completedDate:entry.status === "done" ? todayDate() : "", completedOutcome:"", tags:[], highlight:!!entry.focusArea };
+}
+function auditEventFor(card, action, note, before, after) {
+  const prior = before || {}, next = after || {};
+  const actor = getUpdatedBy() || "unknown";
+  return Object.assign({ timestamp:nowStamp(), cardId:card.id, cardTitle:card.title, action:action, updatedBy:actor, actor:actor, before:prior, after:next, note:note || "" }, structuredActivity(action, { before:prior, after:next }));
+}
+async function appendAuditEvents(events) {
+  const warnings = [];
+  for (const event of events) { try { await postJson("api/card-updates", event); rememberAuditUpdate(event); } catch (err) { warnings.push(event.action + ": " + err.message); } }
+  return warnings;
+}
+async function saveNewProjects(entries, createFolders) {
+  clearNotice(); if (!requireUnlocked() || !entries.length) return false; if (!(await ensureFreshBeforeSave())) return false;
+  const existingNames = new Set(appState.projects.map(t => String(t.title || "").trim().toLowerCase()));
+  const incomingNames = new Set();
+  const duplicate = entries.find(e => {
+    const key = e.title.trim().toLowerCase();
+    const found = existingNames.has(key) || incomingNames.has(key);
+    incomingNames.add(key);
+    return found;
+  });
+  if (duplicate) throw new Error('A project named "' + duplicate.title + '" already exists.');
+  const reservedIds = collectProjectIds();
+  entries.forEach(entry => { entry.id = uniqueProjectId(entry.title, reservedIds); });
+  const cards = [], preSaveEvents = [], postSaveEvents = [], warnings = [];
+  for (const entry of entries) {
+    const card = newProjectCard(entry);
+    if (createFolders) {
+      try {
+        const result = await postJson("api/project-folder/ensure", { projectId:card.id, projectName:card.title });
+        card.folder = { enabled:true, relativePath:result.relativePath };
+        if (result.created) preSaveEvents.push(auditEventFor(card, "project.folder_created", "Project folder template created.", {}, { folder:card.folder }));
+        preSaveEvents.push(auditEventFor(card, "project.folder_linked", "Project linked to its project folder.", {}, { folder:card.folder }));
+        (result.warnings || []).forEach(w => warnings.push(card.title + ": " + w));
+      } catch (err) { postSaveEvents.push(auditEventFor(card, "project.folder_create_failed", err.message)); warnings.push(card.title + ": folder was not created (" + err.message + ")"); }
+    }
+    postSaveEvents.push(auditEventFor(card, "project.created", "Project created.", {}, fieldSnapshot(card))); cards.push(card);
+  }
+  warnings.push(...await appendAuditEvents(preSaveEvents));
+  const originalProjects = appState.projects.slice(); appState.payload.projects = originalProjects.concat(cards);
+  try { await postJson("api/projects", appState.payload); }
+  catch (err) { appState.payload.projects = originalProjects; throw new Error(err.message + (preSaveEvents.length ? " Folder creation was not rolled back; retry saving the project." : "")); }
+  warnings.push(...await appendAuditEvents(postSaveEvents));
+  await loadLatestProjectsFromServer(cards.length + " project(s) saved and synced.");
+  if (warnings.length) showNotice("Saved with warning: " + warnings.join(" | "), "error");
+  return true;
+}
+async function saveSingleProject() {
+  const error = document.getElementById("singleProjectError"); error.textContent = "";
+  const title = document.getElementById("pTitle").value.trim(), status = document.getElementById("pStatus").value;
+  if (!title) { error.textContent = "Project name is required."; return; }
+  if (!["backlog","running","blocked","done"].includes(status)) { error.textContent = "Select a valid status."; return; }
+  if (appState.projects.some(t => String(t.title || "").trim().toLowerCase() === title.toLowerCase())) { error.textContent = "A project with this name already exists."; return; }
+  const entry = { title:title, status:status, lead:document.getElementById("pLead").value.trim(), risk:document.getElementById("pRisk").value, currentStatus:document.getElementById("pCurrentStatus").value.trim(), nextAction:document.getElementById("pNextAction").value.trim(), reviewDate:document.getElementById("pReviewDate").value, focusArea:document.getElementById("pFocusArea").checked };
+  entry.id = uniqueProjectId(title);
+  const button = document.getElementById("saveNewProjectBtn"); button.disabled = true;
+  try { if (await saveNewProjects([entry], document.getElementById("pCreateFolder").checked)) closeProjectModal(); } catch (err) { error.textContent = "Save failed: " + err.message; } finally { button.disabled = false; }
+}
+async function createFolderForCard(id) {
+  if (!requireUnlocked()) return;
+  const index = cardById(id); if (index < 0 || !(await ensureFreshBeforeSave())) return;
+  const card = appState.projects[index]; if (folderMetadata(card)) return openProjectFolder(id);
+  const projectId = uniqueProjectId(card.title); let result;
+  try { result = await postJson("api/project-folder/ensure", { projectId:projectId, projectName:card.title }); }
+  catch (err) { await appendAuditEvents([auditEventFor(card, "project.folder_create_failed", err.message)]); showNotice("Folder creation failed: " + err.message, "error"); return; }
+  const folder = { enabled:true, relativePath:result.relativePath };
+  if (result.created) await appendAuditEvents([auditEventFor(card, "project.folder_created", "Project folder template created.", {}, { folder:folder })]);
+  card.folder = folder; appState.payload.projects = appState.projects;
+  try {
+    await postJson("api/projects", appState.payload);
+    await appendAuditEvents([auditEventFor(card, "project.folder_linked", "Existing project linked to its project folder.", {}, { folder:folder })]);
+    await loadLatestProjectsFromServer("Project folder created and linked.");
+    if ((result.warnings || []).length) showNotice(result.warnings.join(" "), "error");
+  } catch (err) { delete card.folder; showNotice("Folder was created but the card link could not be saved. Retry Create project folder. " + err.message, "error"); }
+}
+async function openProjectFolder(id) {
+  const index = cardById(id); if (index < 0) return;
+  const card = appState.projects[index], folder = folderMetadata(card);
+  if (!folder) { if (appState.editingUnlocked) return createFolderForCard(id); showNotice("No folder linked. Unlock editing to create a project folder.", "error"); return; }
+  try { const result = await postJson("api/project-folder/open", { relativePath:folder.relativePath }); if ((result.warnings || []).length) showNotice(result.warnings.join(" "), "error"); }
+  catch (err) { showNotice("Could not open project folder: " + err.message, "error"); }
+}
+function updateFolderIndicator(id) {
+  const status = appState.folderStatuses[id], dot = document.querySelector('[data-folder-dot="' + CSS.escape(id) + '"]'), button = document.querySelector('[data-folder="' + CSS.escape(id) + '"]');
+  if (!dot || !button) return;
+  const index = cardById(id), linked = index >= 0 ? folderMetadata(appState.projects[index]) : null;
+  dot.className = "folder-dot " + (!linked ? "none" : status && status.existsCanonical ? "canonical" : "warning");
+  button.title = !linked ? (appState.editingUnlocked ? "Create project folder" : "No folder linked") : status && status.existsCanonical ? "Open Team ESMI project folder" : "Folder missing or Team ESMI unavailable";
+}
+async function refreshFolderStatuses() {
+  const linkedCards = appState.projects.filter(folderMetadata);
+  await Promise.all(linkedCards.map(async card => {
+    try { const r = await fetch("api/project-folder/status?relativePath=" + encodeURIComponent(card.folder.relativePath), { cache:"no-store" }); const status = await r.json(); appState.folderStatuses[card.id] = r.ok ? status : { existsCanonical:false, warnings:[status.error || "Status unavailable"] }; }
+    catch (_) { appState.folderStatuses[card.id] = { existsCanonical:false, warnings:["Status unavailable"] }; }
+    updateFolderIndicator(card.id);
+  }));
+}
+function toDate(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+function daysSince(value) {
+  const d = toDate(value);
+  if (!d) return null;
+  return Math.floor((new Date() - d) / 86400000);
+}
+function hoursSince(value) {
+  const d = toDate(value);
+  if (!d) return null;
+  return (new Date() - d) / 3600000;
+}
+function sameLocalDay(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+function getAuditKey(card) {
+  return (card && card.id ? "id:" + card.id : "") || (card && card.title ? "title:" + String(card.title).trim().toLowerCase() : "");
+}
+function rememberAuditUpdate(event) {
+  rememberActivityEvent(event);
+  if (!event || !event.timestamp) return;
+  const keys = [];
+  if (event.cardId) keys.push("id:" + event.cardId);
+  if (event.cardTitle) keys.push("title:" + String(event.cardTitle).trim().toLowerCase());
+  keys.forEach(key => {
+    const existing = appState.auditUpdates[key];
+    if (!existing || toDate(event.timestamp) > toDate(existing.timestamp)) {
+      appState.auditUpdates[key] = { timestamp: event.timestamp, updatedBy: event.updatedBy || "", action: event.action || "" };
+    }
+  });
+}
+function getCardUpdatedAt(card) {
+  if (toDate(card.lastUpdated)) return card.lastUpdated;
+  const direct = appState.auditUpdates[getAuditKey(card)];
+  if (direct && toDate(direct.timestamp)) return direct.timestamp;
+  const byTitle = appState.auditUpdates["title:" + String(card.title || "").trim().toLowerCase()];
+  return byTitle && toDate(byTitle.timestamp) ? byTitle.timestamp : "";
+}
+function formatRelativeUpdateTime(iso) {
+  const d = toDate(iso);
+  if (!d) return "";
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (sameLocalDay(d, now)) return "Updated today";
+  if (sameLocalDay(d, yesterday)) return "Updated yesterday";
+  const days = Math.max(1, Math.floor((now - d) / 86400000));
+  if (days < 14) return "Updated " + days + "d ago";
+  if (days < 31) return "Updated " + Math.max(2, Math.round(days / 7)) + "w ago";
+  return "Updated " + Math.max(1, Math.round(days / 30)) + "mo ago";
+}
+function isRecentlyUpdated(iso, days) {
+  const age = daysSince(iso);
+  return age !== null && age < days;
+}
+function updateBadgeClass(iso) {
+  const h = hoursSince(iso);
+  if (h !== null && h < 24) return "today";
+  if (isRecentlyUpdated(iso, 7)) return "week";
+  return "";
+}
+async function loadAuditUpdates() {
+  appState.auditUpdates = {};
+  appState.auditActivities = [];
+  if (appState.cardActivityLoadPromise) await appState.cardActivityLoadPromise;
+  if (appState.cardActivityIndex && appState.cardActivityIndex.cards) {
+    const entries = Array.isArray(appState.cardActivityIndex.cards) ? appState.cardActivityIndex.cards : Object.values(appState.cardActivityIndex.cards);
+    entries.forEach(entry => {
+      if (!entry || !entry.lastActivityAt) return;
+      const value = { timestamp:entry.lastActivityAt, updatedBy:"", action:entry.lastActivitySummary || "Card updated" };
+      if (entry.cardId) appState.auditUpdates["id:" + entry.cardId] = value;
+      if (entry.title) appState.auditUpdates["title:" + String(entry.title).trim().toLowerCase()] = value;
+    });
+    return;
+  }
+  try {
+    const r = await fetch("data/card_updates.jsonl?ts=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) return;
+    const text = await r.text();
+    parseJsonObjectStream(text).forEach(rememberAuditUpdate);
+  } catch (err) {
+    console.warn("Audit recency load failed", err);
+  }
+}
+function daysUntil(value) {
+  const d = toDate(value);
+  if (!d) return null;
+  const today = new Date(todayDate() + "T00:00:00");
+  return Math.ceil((d - today) / 86400000);
+}
+function stableId(t, index) {
+  if (!t.id) t.id = "card-" + String(index + 1).padStart(3, "0") + "-" + String(t.title || "untitled").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 44);
+  return t.id;
+}
+function firstPerson(t) {
+  return Array.isArray(t.people) && t.people.length ? t.people[0] : "";
+}
+function leadFor(t) {
+  if (typeof t.projectLead === "string") return t.projectLead.trim();
+  if (typeof t.leadName === "string") return t.leadName.trim();
+  return firstPerson(t).trim();
+}
+function normalizeCard(t, index) {
+  stableId(t, index);
+  t.status = normalizeStatus(t.status);
+  if (!t.owner) t.owner = "";
+  if (typeof t.projectLead === "string") t.projectLead = t.projectLead.trim();
+  if (typeof t.leadName === "string") t.leadName = t.leadName.trim();
+  if (!t.nextAction && t.next) t.nextAction = t.next;
+  if (!t.blockerReason && t.blocked) t.blockerReason = t.blocked;
+  if (!t.riskColour) t.riskColour = t.status === "blocked" ? "red" : "green";
+  if (!t.tags) t.tags = [];
+  if (typeof t.tags === "string") t.tags = t.tags.split(",").map(s => s.trim()).filter(Boolean);
+  if (!t.notes) t.notes = "";
+  if (!t.evidenceSource) t.evidenceSource = "";
+  if (!t.waitingOn) t.waitingOn = "";
+  if (!t.reviewDate) t.reviewDate = "";
+  if (!t.lastUpdated) t.lastUpdated = "";
+  if (!t.updatedBy) t.updatedBy = "";
+  if (!t.completedDate) t.completedDate = "";
+  if (!t.completedOutcome) t.completedOutcome = "";
+  return t;
+}
+function getUpdatedBy() {
+  return localStorage.getItem(STORAGE_USER_KEY) || "Unknown";
+}
+function setUpdatedBy(value) {
+  localStorage.setItem(STORAGE_USER_KEY, value || "Unknown");
+}
+function showNotice(message, kind) {
+  const el = document.getElementById("notice");
+  el.className = "notice open " + (kind || "ok");
+  el.textContent = message;
+}
+function clearNotice() {
+  const el = document.getElementById("notice");
+  el.className = "notice";
+  el.textContent = "";
+}
+function adelaideTime(value, includeDate) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not available";
+  return date.toLocaleString("en-AU", Object.assign({ timeZone:"Australia/Adelaide", hour:"numeric", minute:"2-digit" }, includeDate ? { day:"2-digit", month:"short" } : {}));
+}
+function latestTeamDataRevision(status) {
+  const values = [sourceProjectsRevision(status), sourceAuditRevision(status)].map(value => value ? new Date(value) : null).filter(value => value && !Number.isNaN(value.getTime()));
+  return values.length ? new Date(Math.max(...values.map(value => value.getTime()))) : null;
+}
+function renderSyncIndicator() {
+  const root = document.getElementById("syncIndicator"), label = document.getElementById("syncLabel"), meta = document.getElementById("syncMeta"), clock = document.getElementById("syncClock");
+  if (!root || !label || !meta || !clock) return;
+  const status = appState.sync.lastStatus;
+  const source = status && status.source, local = status && status.local;
+  const sourceReady = !!(source && source.projects && source.projects.exists && source.audit && source.audit.exists);
+  const localReady = !!(local && local.projects && local.projects.exists && local.audit && local.audit.exists);
+  const matching = sourceReady && localReady && source.projects.hash === local.projects.hash && source.audit.hash === local.audit.hash;
+  let state = "checking", text = "Checking Team ESMI…";
+  if (appState.sync.lastError) { state = "offline"; text = "Team ESMI check failed"; }
+  else if (appState.sync.pending) { state = "warning"; text = "Team ESMI update available"; }
+  else if (matching) { state = "synced"; text = "Team ESMI synced"; }
+  else if (status) { state = "warning"; text = sourceReady ? "Sync needs attention" : "Team ESMI unavailable"; }
+  root.className = "sync-indicator " + state;
+  label.textContent = text;
+  const revised = latestTeamDataRevision(status);
+  const checked = appState.sync.lastCheckedAt ? adelaideTime(appState.sync.lastCheckedAt, false) : "not yet";
+  meta.textContent = (revised ? "Data " + adelaideTime(revised, true) : "Data revision unavailable") + " · checked " + checked;
+  clock.textContent = adelaideTime(new Date(), false);
+  root.title = appState.sync.lastError || (matching ? "Local runtime matches the Team ESMI canonical projects and activity data." : text);
+}
+function recordSyncCheck(status, error) {
+  if (status) {
+    appState.sync.lastStatus = status;
+    appState.sync.lastCheckedAt = new Date();
+    appState.sync.lastError = "";
+  } else if (error) {
+    appState.sync.lastError = error.message || String(error);
+  }
+  renderSyncIndicator();
+}
+function startHeaderClock() {
+  if (appState.sync.clockTimer) window.clearInterval(appState.sync.clockTimer);
+  renderSyncIndicator();
+  appState.sync.clockTimer = window.setInterval(renderSyncIndicator, 30000);
+}
+function sourceProjectsRevision(status) {
+  return status && status.source && status.source.projects ? (status.source.projects.lastWriteUtc || "") : "";
+}
+function sourceAuditRevision(status) {
+  return status && status.source && status.source.audit ? (status.source.audit.lastWriteUtc || "") : "";
+}
+function rememberSyncStatus(status) {
+  recordSyncCheck(status);
+  const projectsRevision = sourceProjectsRevision(status);
+  const auditRevision = sourceAuditRevision(status);
+  if (projectsRevision) appState.sync.projectsRevision = projectsRevision;
+  if (auditRevision) appState.sync.auditRevision = auditRevision;
+}
+function isEditingActive() {
+  const active = document.activeElement;
+  if (appState.editingIndex >= 0 || projectModalOpen()) return true;
+  if (!active) return false;
+  if (active.matches && active.matches("input, textarea, select, [contenteditable='true']")) return true;
+  return false;
+}
+function isPresentationOpen() {
+  const overlay = document.getElementById("presentationOverlay");
+  return !!(overlay && overlay.classList.contains("open"));
+}
+async function fetchSyncStatus() {
+  const r = await fetch("api/sync-status", { cache: "no-store" });
+  const payload = await r.json();
+  if (!r.ok || payload.ok === false) throw new Error(payload.error || ("HTTP " + r.status));
+  return payload;
+}
+async function loadLatestProjectsFromServer(message) {
+  const status = await fetchSyncStatus();
+  const dataResp = await fetch("data/projects.json?ts=" + Date.now(), { cache: "no-store" });
+  if (!dataResp.ok) throw new Error("HTTP " + dataResp.status);
+  appState.payload = await dataResp.json();
+  rememberSyncStatus(status);
+  await loadAuditUpdates();
+  render(appState.payload.projects || [], appState.payload.meta || {});
+  renderReviewCurrent();
+  if (message) showNotice(message, "ok");
+}
+async function applyPendingSync() {
+  if (!appState.sync.pending) return;
+  const pending = appState.sync.pending;
+  appState.sync.pending = null;
+  await loadLatestProjectsFromServer(pending.message || "Updated from Team ESMI");
+}
+async function pollSyncStatus() {
+  if (appState.sync.polling) return;
+  appState.sync.polling = true;
+  try {
+    const status = await fetchSyncStatus();
+    const nextProjectsRevision = sourceProjectsRevision(status);
+    const hasLoadedRevision = !!appState.sync.projectsRevision;
+    const sourceChanged = hasLoadedRevision && nextProjectsRevision && nextProjectsRevision !== appState.sync.projectsRevision;
+    recordSyncCheck(status);
+    if (sourceChanged) {
+      if (isEditingActive()) {
+        appState.sync.pending = { revision: nextProjectsRevision, message: "Updated from Team ESMI" };
+        renderSyncIndicator();
+        showNotice("New updates are available. Finish or cancel your edit to refresh.", "ok");
+      } else {
+        await loadLatestProjectsFromServer("Updated from Team ESMI");
+      }
+    } else {
+      rememberSyncStatus(status);
+    }
+  } catch (err) {
+    recordSyncCheck(null, err);
+    console.warn("Sync poll failed", err);
+  } finally {
+    appState.sync.polling = false;
+  }
+}
+function startSyncPolling() {
+  if (appState.sync.timer) window.clearInterval(appState.sync.timer);
+  appState.sync.timer = window.setInterval(pollSyncStatus, SYNC_POLL_MS);
+}
+function requestSyncCheck() {
+  if (document.visibilityState && document.visibilityState !== "visible") return;
+  pollSyncStatus();
+}
+async function ensureFreshBeforeSave() {
+  const status = await fetchSyncStatus();
+  const nextProjectsRevision = sourceProjectsRevision(status);
+  if (appState.sync.projectsRevision && nextProjectsRevision && nextProjectsRevision !== appState.sync.projectsRevision) {
+    appState.sync.pending = { revision: nextProjectsRevision, message: "Updated from Team ESMI" };
+    renderSyncIndicator();
+    showNotice("Remote update available - close this editor and refresh before saving to avoid overwriting newer Team ESMI data.", "error");
+    return false;
+  }
+  rememberSyncStatus(status);
+  return true;
+}
+function loadEditSession() {
+  const token = sessionStorage.getItem(EDIT_TOKEN_KEY) || "";
+  const expires = sessionStorage.getItem(EDIT_EXPIRES_KEY) || "";
+  if (token && expires && new Date(expires) > new Date()) {
+    appState.editingUnlocked = true;
+    appState.editToken = token;
+  } else {
+    appState.editingUnlocked = false;
+    appState.editToken = "";
+    sessionStorage.removeItem(EDIT_TOKEN_KEY);
+    sessionStorage.removeItem(EDIT_EXPIRES_KEY);
+  }
+}
+function setEditSession(token, expires) {
+  appState.editingUnlocked = true;
+  appState.editToken = token;
+  sessionStorage.setItem(EDIT_TOKEN_KEY, token);
+  sessionStorage.setItem(EDIT_EXPIRES_KEY, expires);
+  updateEditState();
+}
+function clearEditSession() {
+  appState.editingUnlocked = false;
+  appState.editToken = "";
+  sessionStorage.removeItem(EDIT_TOKEN_KEY);
+  sessionStorage.removeItem(EDIT_EXPIRES_KEY);
+  updateEditState();
+}
+function updateEditState() {
+  const state = document.getElementById("editState");
+  const unlock = document.getElementById("unlockBtn");
+  const lock = document.getElementById("lockBtn");
+  const addProject = document.getElementById("addProjectBtn");
+  if (!state) return;
+  state.textContent = appState.editingUnlocked ? "Editing unlocked" : "Editing locked";
+  state.className = "edit-state" + (appState.editingUnlocked ? " unlocked" : "");
+  unlock.style.display = appState.editingUnlocked ? "none" : "";
+  lock.style.display = appState.editingUnlocked ? "" : "none";
+  if (addProject) { addProject.hidden = !appState.editingUnlocked; addProject.disabled = !appState.editingUnlocked; }
+  document.querySelectorAll("[data-edit-required]").forEach(btn => {
+    btn.disabled = !appState.editingUnlocked;
+    btn.title = appState.editingUnlocked ? "" : "Unlock editing to update cards.";
+  });
+}
+function setOverviewOpen(open, remember) {
+  const panel = document.getElementById("overviewPanel");
+  const toggle = document.getElementById("overviewToggle");
+  if (!panel || !toggle) return;
+  panel.classList.toggle("open", open);
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  if (remember) {
+    try { localStorage.setItem(OVERVIEW_STORAGE_KEY, open ? "true" : "false"); } catch (_) {}
+  }
+}
+function loadOverviewState() {
+  let open = false;
+  try { open = localStorage.getItem(OVERVIEW_STORAGE_KEY) === "true"; } catch (_) {}
+  setOverviewOpen(open, false);
+}
+function hideSplash() {
+  const splash = document.getElementById("splash");
+  if (!splash || !splashReady) return;
+  splash.classList.add("hidden");
+}
+function markSplashReady() {
+  splashReady = true;
+  const status = document.getElementById("splashStatus");
+  if (status) status.textContent = "Ready";
+  setTimeout(() => {
+    splashCanDismiss = true;
+    hideSplash();
+  }, 850);
+}
+function setSplashError(message) {
+  splashReady = false;
+  const status = document.getElementById("splashStatus");
+  if (status) status.textContent = message || "Could not load project portfolio.";
+}
+function loadPresentationSelection() {
+  try {
+    const ids = JSON.parse(localStorage.getItem(PRESENTATION_STORAGE_KEY) || "[]");
+    appState.presentationIds = Array.isArray(ids) ? ids.filter(Boolean) : [];
+  } catch (_) {
+    appState.presentationIds = [];
+  }
+}
+function savePresentationSelection() {
+  try { localStorage.setItem(PRESENTATION_STORAGE_KEY, JSON.stringify(appState.presentationIds)); } catch (_) {}
+}
+function isPresentationSelected(id) {
+  return appState.presentationIds.includes(id);
+}
+function setPresentationSelected(id, selected) {
+  if (!id) return;
+  if (selected && !appState.presentationIds.includes(id)) appState.presentationIds.push(id);
+  if (!selected) appState.presentationIds = appState.presentationIds.filter(x => x !== id);
+  savePresentationSelection();
+}
+function selectedPresentationCards() {
+  const byId = {};
+  appState.projects.forEach(t => byId[t.id] = t);
+  return appState.presentationIds.map(id => byId[id]).filter(Boolean);
+}
+function visiblePresentationCards() {
+  const filter = document.getElementById("presentationFilter").value;
+  return appState.projects.filter(t => {
+    if (filter === "all") return true;
+    if (filter === "needs") return healthFor(t) === "Needs Update" || healthFor(t) === "Stale";
+    if (filter === "focus") return !!t.highlight;
+    return t.status === filter;
+  });
+}
+function renderPresentationSetup() {
+  const selected = selectedPresentationCards();
+  const count = document.getElementById("presentationCount");
+  const selectedList = document.getElementById("selectedPresentationList");
+  const picker = document.getElementById("presentationPicker");
+  if (!count || !selectedList || !picker) return;
+  count.textContent = selected.length;
+  selectedList.innerHTML = selected.length ? selected.map((t, i) =>
+    '<div class="selected-row">' +
+      '<span class="badge">' + (i + 1) + '</span>' +
+      '<div><div class="title">' + esc(t.title) + '</div><div class="meta">' + esc(STATUS_LABELS[t.status] || t.status) + ' · ' + esc(healthFor(t)) + '</div></div>' +
+      '<span><button class="mini-btn" data-present-move="' + attr(t.id) + '" data-dir="-1">Up</button> ' +
+      '<button class="mini-btn" data-present-move="' + attr(t.id) + '" data-dir="1">Down</button> ' +
+      '<button class="mini-btn" data-present-remove="' + attr(t.id) + '">Remove</button></span>' +
+    '</div>'
+  ).join("") : '<div class="empty-col">No cards selected</div>';
+  picker.innerHTML = visiblePresentationCards().map(t =>
+    '<label class="picker-row">' +
+      '<input type="checkbox" data-present-pick="' + attr(t.id) + '"' + (isPresentationSelected(t.id) ? ' checked' : '') + '>' +
+      '<div><div class="title">' + esc(t.title) + '</div><div class="meta">' + esc(STATUS_LABELS[t.status] || t.status) + ' · ' + esc(healthFor(t)) + '</div></div>' +
+      '<span class="badge risk-' + esc(t.riskColour) + '">' + esc(t.riskColour || "green") + '</span>' +
+    '</label>'
+  ).join("");
+  document.querySelectorAll("[data-present-select]").forEach(el => {
+    el.checked = isPresentationSelected(el.getAttribute("data-present-select"));
+  });
+}
+function openPresentationSetup() {
+  renderPresentationSetup();
+  document.getElementById("presentationPanel").classList.add("open");
+}
+function closePresentationSetup() {
+  document.getElementById("presentationPanel").classList.remove("open");
+}
+function movePresentationCard(id, dir) {
+  const idx = appState.presentationIds.indexOf(id);
+  const next = idx + Number(dir);
+  if (idx < 0 || next < 0 || next >= appState.presentationIds.length) return;
+  const ids = appState.presentationIds;
+  [ids[idx], ids[next]] = [ids[next], ids[idx]];
+  savePresentationSelection();
+  renderPresentationSetup();
+}
+function presentationStatusLine() {
+  const counts = {};
+  COLS.forEach(c => counts[c.key] = appState.projects.filter(t => t.status === c.key).length);
+  const stamp = new Date().toLocaleString('en-AU', { timeZone: 'Australia/Adelaide' });
+  return stamp + " | " + appState.projects.length + " cards | " +
+    COLS.map(c => c.label + ": " + counts[c.key]).join(" | ");
+}
+function renderPresentationCard(t) {
+  const updatedAt = getCardUpdatedAt(t);
+  return '<article class="presentation-card s-' + esc(t.status) + '">' +
+    '<div class="presentation-card-title">' + esc(t.title) + '</div>' +
+    '<div class="presentation-kicker">' +
+      '<span class="badge">' + esc(STATUS_LABELS[t.status] || t.status) + '</span>' +
+      '<span class="badge risk-' + esc(t.riskColour || "green") + '">Risk: ' + esc(t.riskColour || "green") + '</span>' +
+      (updatedAt ? '<span class="badge updated ' + updateBadgeClass(updatedAt) + '">' + esc(formatRelativeUpdateTime(updatedAt)) + '</span>' : '') +
+    '</div>' +
+    '<div class="presentation-card-grid">' +
+      '<div><b>Lead</b>' + esc(leadFor(t) || "Unassigned") + '</div>' +
+      '<div><b>Next</b>' + esc(t.nextAction || t.next || "Not recorded") + '</div>' +
+      '<div><b>Review</b>' + esc(t.reviewDate || "Not recorded") + '</div>' +
+      (t.blockerReason ? '<div><b>Blocker</b>' + esc(t.blockerReason) + '</div>' : '') +
+    '</div>' +
+  '</article>';
+}
+function renderPresentationBoard() {
+  const slide = document.getElementById("presentationSlide");
+  if (!slide) return;
+  document.getElementById("presentationSlideCount").textContent = appState.projects.length + " cards";
+  slide.style.setProperty("--presentation-density", appState.presentationDensity);
+  slide.innerHTML =
+    '<div class="presentation-wall-head">' +
+      '<div><h2>SAMI Project Portfolio</h2><div class="presentation-status-line">' + esc(presentationStatusLine()) + '</div></div>' +
+      '<div class="presentation-density">Density ' + Math.round(appState.presentationDensity * 100) + '%</div>' +
+    '</div>' +
+    '<div class="presentation-board">' +
+      COLS.map(col => {
+        const items = appState.projects.filter(t => t.status === col.key);
+        return '<section class="presentation-col">' +
+          '<h3><span>' + esc(col.label) + '</span><span class="count">' + items.length + '</span></h3>' +
+          (items.length ? items.map(renderPresentationCard).join("") : '<div class="empty-col">No items</div>') +
+        '</section>';
+      }).join("") +
+    '</div>';
+}
+function renderPresentationSplash() {
+  document.getElementById("presentationSlideCount").textContent = "Starting";
+  document.getElementById("presentationSlide").innerHTML =
+    '<div class="presentation-splash">' +
+      '<div>' +
+        '<div class="splash-mark" aria-hidden="true"></div>' +
+        '<div class="presentation-title">SAMI Project Portfolio</div>' +
+        '<div class="presentation-stage-subtitle">Enterprise Imaging &amp; Operational Systems</div>' +
+      '</div>' +
+    '</div>';
+}
+function changePresentationDensity(delta) {
+  appState.presentationDensity = Math.max(0.82, Math.min(1.22, appState.presentationDensity + delta));
+  closePresentationHelp();
+  renderPresentationBoard();
+}
+function presentationNext() {
+  changePresentationDensity(0.08);
+}
+function presentationPrev() {
+  changePresentationDensity(-0.08);
+}
+function setPresentationHelpOpen(open) {
+  const help = document.getElementById("presentationHelp");
+  const btn = document.getElementById("presentationHelpBtn");
+  if (!help || !btn) return;
+  help.classList.toggle("open", open);
+  btn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+function closePresentationHelp() {
+  setPresentationHelpOpen(false);
+}
+function showFullscreenFallback(message) {
+  document.getElementById("fullscreenMessage").textContent = message || "";
+}
+async function requestPresentationFullscreen() {
+  const overlay = document.getElementById("presentationOverlay");
+  showFullscreenFallback("");
+  if (!overlay.requestFullscreen) {
+    showFullscreenFallback("Presentation view is open. Press F11 in Edge for full screen.");
+    return;
+  }
+  try {
+    await overlay.requestFullscreen();
+  } catch (_) {
+    showFullscreenFallback("Presentation view is open. Press F11 in Edge for full screen.");
+  }
+}
+async function launchPresentation() {
+  closePresentationSetup();
+  appState.presentationIndex = 0;
+  document.body.classList.add("presentation-active");
+  document.getElementById("presentationOverlay").classList.add("open");
+  renderPresentationSplash();
+  window.setTimeout(() => {
+    if (isPresentationOpen()) renderPresentationBoard();
+  }, 900);
+  await requestPresentationFullscreen();
+}
+function exitPresentation() {
+  document.getElementById("presentationOverlay").classList.remove("open");
+  document.body.classList.remove("presentation-active");
+  closePresentationHelp();
+  showFullscreenFallback("");
+  if (document.fullscreenElement && document.exitFullscreen) {
+    document.exitFullscreen().catch(() => {});
+  }
+}
+function requireUnlocked() {
+  if (appState.editingUnlocked) return true;
+  showNotice("Editing is locked. Use Unlock Editing before saving changes.", "error");
+  return false;
+}
+function healthFor(t) {
+  if (t.status === "done") return (t.completedOutcome || t.evidenceSource) ? "Done" : "Needs Update";
+  if (t.status === "blocked") return (t.blockerReason || t.waitingOn) ? "Blocked" : "Needs Update";
+  const staleDays = daysSince(t.lastUpdated);
+  if (staleDays !== null && staleDays >= appState.config.staleThresholdDays) return "Stale";
+  if (!t.owner || !t.nextAction || !t.reviewDate || !t.lastUpdated) return "Needs Update";
+  return "Healthy";
+}
+function healthClass(label) {
+  return label === "Healthy" ? "healthy" : label === "Stale" ? "stale" : label === "Blocked" ? "blocked" : label === "Done" ? "done" : "needs";
+}
+function activeForHealth(t) {
+  return t.status !== "done";
+}
+function fieldSnapshot(t) {
+  const keys = ["status","owner","projectLead","riskColour","context","nextAction","waitingOn","blockerReason","reviewDate","lastUpdated","updatedBy","evidenceSource","notes","completedDate","completedOutcome"];
+  const out = {};
+  keys.forEach(k => { if (t[k] !== undefined) out[k] = t[k]; });
+  if (out.projectLead === undefined) out.projectLead = leadFor(t);
+  return out;
+}
+function changedOnly(before, after) {
+  const b = {}, a = {};
+  Object.keys(after).forEach(k => {
+    if (JSON.stringify(before[k] || "") !== JSON.stringify(after[k] || "")) {
+      b[k] = before[k] || "";
+      a[k] = after[k] || "";
+    }
+  });
+  return { before: b, after: a };
+}
+function structuredActivity(action, diff) {
+  const changes = {};
+  const before = diff && diff.before ? diff.before : {}, after = diff && diff.after ? diff.after : {};
+  Object.keys(after).forEach(field => {
+    if (["lastUpdated","updatedBy","next"].includes(field)) return;
+    if (JSON.stringify(before[field]) !== JSON.stringify(after[field])) changes[field] = { old:before[field] === undefined ? "" : before[field], new:after[field] === undefined ? "" : after[field] };
+  });
+  const meaningful = Object.keys(changes).filter(field => ACTIVITY_FIELD_META[field]);
+  const meta = meaningful.length === 1 ? ACTIVITY_FIELD_META[meaningful[0]] :
+    (action === "save_update" && meaningful.length > 1 ? ["field_change", "Card updated"] : (ACTIVITY_ACTION_META[action] || ["field_change", "Card updated"]));
+  return { source:"kanban-ui", type:meta[0], summary:meta[1], changes:changes };
+}
+function cardById(id) {
+  return appState.projects.findIndex(t => t.id === id);
+}
+function groupHealth() {
+  const groups = {
+    "No owner": [],
+    "No next action": [],
+    "No review date": [],
+    "Overdue review date": [],
+    "Not updated in 7 days": [],
+    "Not updated in 14 days": [],
+    "Not updated in 30 days": [],
+    "Blocked longer than 7 days": [],
+    "Waiting on vendor/team": [],
+    "Done missing outcome/evidence": []
+  };
+  appState.projects.forEach(t => {
+    const age = daysSince(t.lastUpdated);
+    const due = daysUntil(t.reviewDate);
+    if (activeForHealth(t) && !t.owner) groups["No owner"].push(t);
+    if (activeForHealth(t) && !t.nextAction) groups["No next action"].push(t);
+    if (activeForHealth(t) && !t.reviewDate) groups["No review date"].push(t);
+    if (activeForHealth(t) && due !== null && due < 0) groups["Overdue review date"].push(t);
+    if (activeForHealth(t) && (age === null || age >= 7)) groups["Not updated in 7 days"].push(t);
+    if (activeForHealth(t) && (age === null || age >= 14)) groups["Not updated in 14 days"].push(t);
+    if (activeForHealth(t) && (age === null || age >= 30)) groups["Not updated in 30 days"].push(t);
+    if (t.status === "blocked" && (age === null || age >= appState.config.blockedThresholdDays)) groups["Blocked longer than 7 days"].push(t);
+    if ((t.status === "blocked" || t.waitingOn) && /vendor|philips|dhsa|datacom|team|tba|unassigned/i.test(t.waitingOn + " " + t.people)) groups["Waiting on vendor/team"].push(t);
+    if (t.status === "done" && !t.completedOutcome && !t.evidenceSource) groups["Done missing outcome/evidence"].push(t);
+  });
+  return groups;
+}
+function renderHealthPanel() {
+  const grid = document.getElementById("healthGrid");
+  const groups = groupHealth();
+  document.getElementById("healthSummary").innerHTML =
+    '<div class="summary-tile amber"><b>' + groups["No owner"].length + '</b><span>Missing owner</span></div>' +
+    '<div class="summary-tile amber"><b>' + groups["No review date"].length + '</b><span>Missing review date</span></div>' +
+    '<div class="summary-tile amber"><b>' + groups["Not updated in 14 days"].length + '</b><span>Stale cards</span></div>' +
+    '<div class="summary-tile red"><b>' + groups["Waiting on vendor/team"].length + '</b><span>Blocked / waiting</span></div>' +
+    '<div class="summary-tile red"><b>' + groups["Done missing outcome/evidence"].length + '</b><span>Done missing outcome/evidence</span></div>' +
+    '<div class="summary-tile red"><b>' + groups["Overdue review date"].length + '</b><span>Overdue review</span></div>';
+  grid.innerHTML = Object.keys(groups).map(name => {
+    const items = groups[name];
+    return '<div class="health-group"><h3>' + esc(name) + ' (' + items.length + ')</h3>' +
+      (items.length ? items.slice(0, 8).map(t => '<button data-edit="' + attr(t.id) + '" data-edit-required>' + esc(t.title) + '</button>').join("") : '<div class="empty-col">None</div>') +
+      (items.length > 8 ? '<div class="empty-col">+' + (items.length - 8) + ' more</div>' : "") +
+      '</div>';
+  }).join("");
+}
+function renderCard(t) {
+  const health = healthFor(t);
+  const lead = leadFor(t);
+  const updatedAt = getCardUpdatedAt(t);
+  const recentClass = hoursSince(updatedAt) !== null && hoursSince(updatedAt) < 24 ? " recent-strong" : (isRecentlyUpdated(updatedAt, 7) ? " recent-soft" : "");
+  const detailsOpen = appState.detailsCardId === t.id;
+  let html = '<div class="card s-' + esc(t.status) + recentClass + (t.highlight ? ' highlight' : '') + '" id="card-' + attr(t.id) + '" data-card-id="' + attr(t.id) + '">';
+  if (t.highlight) html += '<div class="highlight-tag">Focus Area</div>';
+  html += '<div class="card-topline"><div class="title">' + esc(t.title) + '</div><div class="card-top-actions">' +
+    '<button class="mini-btn details-btn" type="button" data-details="' + attr(t.id) + '" aria-expanded="' + (detailsOpen ? 'true' : 'false') + '" aria-controls="details-' + attr(t.id) + '">Details</button>' +
+    '<button class="mini-btn" data-edit="' + attr(t.id) + '" data-edit-required>Update</button></div></div>';
+  html += '<span class="badge ' + healthClass(health) + '">' + esc(health) + '</span> ';
+  html += '<span class="badge risk-' + esc(t.riskColour) + '">Risk: ' + esc(t.riskColour) + '</span>';
+  if (updatedAt) html += ' <span class="badge updated ' + updateBadgeClass(updatedAt) + '">' + esc(formatRelativeUpdateTime(updatedAt)) + '</span>';
+  html += ' <span class="file-visibility" data-file-visibility-for="' + attr(t.id) + '">' + fileBadgeMarkup(t) + '</span>';
+  if (t.blockerReason) html += '<div class="blocked-bar">⊘ ' + esc(t.blockerReason) + '</div>';
+  html += '<div class="context">' + esc(t.context) + '</div>';
+  if (t.nextAction) html += '<div class="next-step"><b>Next:</b> ' + esc(t.nextAction) + '</div>';
+  html += '<div class="lead-row"><span>Lead:</span>';
+  if (appState.editingUnlocked) {
+    html += '<input type="text" value="' + attr(lead) + '" placeholder="Unassigned" maxlength="80" data-lead-input="' + attr(t.id) + '" data-edit-required>';
+  } else {
+    html += '<b>' + esc(lead || "Unassigned") + '</b>';
+  }
+  html += '</div>';
+  html += '<div class="meta-row">';
+  if (t.owner) html += '<span class="badge">Owner: ' + esc(t.owner) + '</span>';
+  if (t.waitingOn) html += '<span class="badge">Waiting: ' + esc(t.waitingOn) + '</span>';
+  if (t.reviewDate) html += '<span class="badge">Review Date: ' + esc(t.reviewDate) + '</span>';
+  const linkedFolder = folderMetadata(t);
+  const folderStatus = appState.folderStatuses[t.id];
+  const folderClass = !linkedFolder ? "none" : folderStatus && folderStatus.existsCanonical ? "canonical" : "warning";
+  html += '<button class="folder-action" type="button" data-folder="' + attr(t.id) + '"><span class="folder-dot ' + folderClass + '" data-folder-dot="' + attr(t.id) + '"></span>Files</button>';
+  html += '</div>';
+  html += '<div class="card-activity-line" data-card-activity-for="' + attr(t.id) + '">' + activityLineMarkup(t) + '</div>';
+  html += '<div class="card-details-panel" id="details-' + attr(t.id) + '" data-details-panel-for="' + attr(t.id) + '"' + (detailsOpen ? '' : ' hidden') + '>' + (detailsOpen ? cardDetailsMarkup(t) : '') + '</div>';
+  html += '</div>';
+  return html;
+}
+
+function wipLimitFor(col) {
+  const limits = appState.config.wipLimits || {};
+  return Number(limits[col.label] || (col.key === "backlog" ? limits.Ready : null) || 999);
+}
+function columnPolicyFor(col) {
+  const policies = appState.config.columnPolicies || {};
+  return policies[col.label] || (col.key === "backlog" ? policies.Ready : "") || "";
+}
+function recentCards() {
+  return appState.projects
+    .map(t => ({ card: t, updatedAt: getCardUpdatedAt(t), date: toDate(getCardUpdatedAt(t)) }))
+    .filter(x => x.date)
+    .sort((a, b) => b.date - a.date);
+}
+function renderRecentlyUpdatedStrip() {
+  const strip = document.getElementById("recentStrip");
+  if (!strip) return;
+  const latest = recentCards().slice(0, 5);
+  if (!latest.length) {
+    strip.innerHTML = "";
+    strip.style.display = "none";
+    return;
+  }
+  strip.style.display = "";
+  strip.innerHTML =
+    '<div class="recent-strip-head">' +
+      '<div class="recent-strip-title">Recently Updated</div>' +
+      '<button class="recent-toggle' + (appState.recentFilter ? ' active' : '') + '" id="recentToggle" type="button" aria-pressed="' + (appState.recentFilter ? "true" : "false") + '">Recent</button>' +
+    '</div>' +
+    '<div class="recent-strip-items">' +
+      latest.map(item =>
+        '<button type="button" class="recent-strip-item" data-recent-card="' + attr(item.card.id) + '">' +
+          '<span>' + esc(item.card.title) + '</span>' +
+          '<time>' + esc(formatRelativeUpdateTime(item.updatedAt).replace("Updated ", "")) + '</time>' +
+        '</button>'
+      ).join("") +
+    '</div>';
+  document.body.classList.toggle("recent-filter-active", appState.recentFilter);
+}
+function focusCard(id) {
+  const card = document.getElementById("card-" + id);
+  if (!card) return;
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  card.classList.remove("recent-focus");
+  void card.offsetWidth;
+  card.classList.add("recent-focus");
+}
+
+function render(projects, meta) {
+  appState.projects = projects.map(normalizeCard);
+  appState.meta = meta || {};
+  projects = appState.projects;
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+
+  COLS.forEach(function(col) {
+    const items = projects.filter(function(t) { return t.status === col.key; });
+    const limit = wipLimitFor(col);
+    const policy = columnPolicyFor(col);
+    const warning = items.length > limit ? '<span class="wip-warning">WIP ' + items.length + '/' + limit + '</span>' : "";
+    let colHtml = '<div class="column">';
+    colHtml += '<div class="col-header ' + col.cls + '" title="' + attr(policy) + '">' + col.icon + ' ' + col.label +
+               warning + ' <span class="count">' + items.length + '</span></div>';
+    if (items.length === 0) {
+      colHtml += '<div class="empty-col">No items</div>';
+    } else {
+      items.forEach(function(t) { colHtml += renderCard(t); });
+    }
+    colHtml += '</div>';
+    board.innerHTML += colHtml;
+  });
+
+  const counts = {};
+  COLS.forEach(function(c) { counts[c.key] = projects.filter(function(t) { return t.status === c.key; }).length; });
+  const highlights = projects.filter(function(t) { return t.highlight; }).length;
+  const unhealthy = projects.filter(t => healthFor(t) !== "Healthy" && t.status !== "done").length;
+  const due = groupHealth()["Overdue review date"].length;
+  document.getElementById('stats').innerHTML =
+    '<div class="stat"><b>' + projects.length + '</b> Total</div>' +
+    '<div class="stat" style="color:var(--ready)"><b>' + counts.backlog + '</b> Backlog</div>' +
+    '<div class="stat" style="color:var(--running)"><b>' + counts.running + '</b> In Progress</div>' +
+    '<div class="stat" style="color:var(--blocked)"><b>' + counts.blocked + '</b> Blocked</div>' +
+    '<div class="stat" style="color:var(--done)"><b>' + counts.done + '</b> Done</div>' +
+    '<div class="stat" style="color:var(--highlight)"><b>' + highlights + '</b> Focus Areas</div>' +
+    '<div class="stat" style="color:var(--next)"><b>' + unhealthy + '</b> Needs Update</div>' +
+    '<div class="stat" style="color:var(--blocked)"><b>' + due + '</b> Overdue Review</div>';
+
+  renderHealthPanel();
+  renderRecentlyUpdatedStrip();
+  updateEditState();
+  refreshFolderStatuses().catch(() => {});
+  if (isPresentationOpen()) renderPresentationBoard();
+  if (document.getElementById("presentationPanel").classList.contains("open")) renderPresentationSetup();
+}
+
+function renderDrawerFileDetails(card) {
+  const section = document.getElementById("drawerFileDetails");
+  const counts = document.getElementById("drawerFileCounts");
+  const actions = document.getElementById("drawerFileActions");
+  const entry = projectFileEntry(card);
+  if (!section || !counts || !actions || !entry || document.body.classList.contains("presentation-active")) {
+    if (section) section.hidden = true;
+    return;
+  }
+  const fields = [
+    ["Total files", "fileCount"], ["Admin", "adminCount"], ["Planning", "planningCount"],
+    ["Delivery", "deliveryCount"], ["Meetings", "meetingsCount"],
+    ["Risks / Issues / Decisions", "risksIssuesDecisionsCount"], ["Evidence", "evidenceCount"], ["Closeout", "closeoutCount"]
+  ];
+  if (fileIndexCount(entry, "needsReviewCount") > 0) fields.push(["Needs review", "needsReviewCount"]);
+  counts.innerHTML = fields.map(item => '<div><span>' + item[0] + '</span><b>' + fileIndexCount(entry, item[1]) + '</b></div>').join("");
+  const sortedAt = toDate(entry.lastFileSort);
+  actions.innerHTML = (sortedAt ? '<div class="drawer-file-date">Last file sort: ' + esc(sortedAt.toLocaleString("en-AU", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" })) + '</div>' : '') +
+    (folderMetadata(card) ? '<button class="folder-action" type="button" data-folder="' + attr(card.id) + '">Open project folder</button>' : "");
+  section.hidden = false;
+}
+function renderDrawerActivity(card) {
+  const section = document.getElementById("drawerActivity");
+  const target = document.getElementById("drawerActivityItems");
+  const toggle = document.getElementById("activityToggle");
+  const items = activityItemsFor(card);
+  if (!section || !target || !toggle || !items.length || document.body.classList.contains("presentation-active")) {
+    if (section) section.hidden = true;
+    return;
+  }
+  const expanded = !!appState.activityExpanded[card.id];
+  target.innerHTML = items.slice(0, expanded ? 20 : 5).map(item => {
+    const details = item.details || {};
+    const oldValue = safeActivityValue(details.oldValue), newValue = safeActivityValue(details.newValue);
+    const change = oldValue && newValue ? '<div class="activity-change">' + esc(oldValue) + ' → ' + esc(newValue) + '</div>' : '';
+    return '<div class="activity-item"><div class="activity-item-head"><b>' + esc(item.summary) + '</b><time>' + esc(formatActivityStamp(item.timestamp, false)) + '</time></div>' + change + '</div>';
+  }).join("");
+  toggle.hidden = items.length <= 5;
+  toggle.textContent = expanded ? "Show recent activity" : "View full history";
+  toggle.onclick = () => { appState.activityExpanded[card.id] = !expanded; renderDrawerActivity(card); };
+  section.hidden = false;
+}
+function openDrawer(index) {
+  appState.editingIndex = index;
+  const t = appState.projects[index];
+  document.getElementById("drawerTitle").textContent = t.title;
+  document.getElementById("drawerSubtitle").textContent = "Updated by " + getUpdatedBy();
+  document.getElementById("fStatus").innerHTML = COLS.map(c => '<option value="' + c.key + '">' + c.label + '</option>').join("");
+  document.getElementById("fStatus").value = normalizeStatus(t.status);
+  document.getElementById("fOwner").value = t.owner || "";
+  document.getElementById("fRisk").value = t.riskColour || "green";
+  document.getElementById("fNextAction").value = t.nextAction || "";
+  document.getElementById("fWaitingOn").value = t.waitingOn || "";
+  document.getElementById("fBlocker").value = t.blockerReason || "";
+  document.getElementById("fReviewDate").value = t.reviewDate || "";
+  document.getElementById("fEvidence").value = t.evidenceSource || "";
+  document.getElementById("fNotes").value = t.notes || "";
+  document.getElementById("fCompletedDate").value = t.completedDate || "";
+  document.getElementById("fCompletedOutcome").value = t.completedOutcome || "";
+  renderDrawerFileDetails(t);
+  renderDrawerActivity(t);
+  document.getElementById("drawerBackdrop").classList.add("open");
+  document.getElementById("drawer").classList.add("open");
+}
+function closeDrawer() {
+  document.getElementById("drawerBackdrop").classList.remove("open");
+  document.getElementById("drawer").classList.remove("open");
+  appState.editingIndex = -1;
+  setTimeout(() => {
+    if (!isEditingActive()) applyPendingSync().catch(err => showNotice("Sync refresh failed: " + err.message, "error"));
+  }, 0);
+}
+function readFormInto(card) {
+  card.status = document.getElementById("fStatus").value;
+  card.owner = document.getElementById("fOwner").value.trim();
+  card.riskColour = document.getElementById("fRisk").value;
+  card.nextAction = document.getElementById("fNextAction").value.trim();
+  card.next = card.nextAction;
+  card.waitingOn = document.getElementById("fWaitingOn").value.trim();
+  card.blockerReason = document.getElementById("fBlocker").value.trim();
+  card.blocked = card.blockerReason;
+  card.reviewDate = document.getElementById("fReviewDate").value;
+  card.evidenceSource = document.getElementById("fEvidence").value.trim();
+  card.notes = document.getElementById("fNotes").value.trim();
+  card.completedDate = document.getElementById("fCompletedDate").value;
+  card.completedOutcome = document.getElementById("fCompletedOutcome").value.trim();
+}
+async function postJson(url, body) {
+  const headers = { "Content-Type": "application/json; charset=utf-8" };
+  if (appState.editToken) headers["X-Kanban-Edit-Token"] = appState.editToken;
+  if (appState.sync.projectsRevision) headers["X-Kanban-Projects-Revision"] = appState.sync.projectsRevision;
+  const r = await fetch(url, { method: "POST", headers: headers, body: JSON.stringify(body) });
+  let payload = {};
+  try { payload = await r.json(); } catch (_) {}
+  if (!r.ok || payload.ok === false) throw new Error(payload.error || ("HTTP " + r.status));
+  if (payload.syncStatus) rememberSyncStatus(payload.syncStatus);
+  return payload;
+}
+async function persistCard(action, note, mutate) {
+  clearNotice();
+  if (!requireUnlocked()) return;
+  if (appState.editingIndex < 0) return;
+  if (!(await ensureFreshBeforeSave())) return;
+  const card = appState.projects[appState.editingIndex];
+  const before = fieldSnapshot(card);
+  if (mutate) mutate(card);
+  else readFormInto(card);
+  const stamp = nowStamp();
+  card.lastUpdated = stamp;
+  card.updatedBy = getUpdatedBy();
+  if (card.status === "done" && !card.completedDate) card.completedDate = todayDate();
+  const after = fieldSnapshot(card);
+  const diff = changedOnly(before, after);
+  const event = {
+    timestamp: stamp,
+    cardId: card.id,
+    cardTitle: card.title,
+    action: action,
+    updatedBy: card.updatedBy,
+    actor: card.updatedBy || "unknown",
+    before: diff.before,
+    after: diff.after,
+    note: note || ""
+  };
+  Object.assign(event, structuredActivity(action, diff));
+  try {
+    await postJson("api/card-updates", event);
+    rememberAuditUpdate(event);
+    appState.payload.projects = appState.projects;
+    await postJson("api/projects", appState.payload);
+    if (appState.reviewStats) countReviewAction(action);
+    closeDrawer();
+    await loadLatestProjectsFromServer("Saved and synced");
+    renderReviewCurrent();
+  } catch (err) {
+    showNotice("Save failed. Audit/data not updated: " + err.message, "error");
+  }
+}
+async function persistLeadChange(id, value) {
+  clearNotice();
+  if (!requireUnlocked()) return;
+  const idx = cardById(id);
+  if (idx < 0) return;
+  if (!(await ensureFreshBeforeSave())) return;
+  const card = appState.projects[idx];
+  const beforeLead = leadFor(card);
+  const nextLead = (value || "").trim();
+  if (beforeLead === nextLead) {
+    render(appState.projects, appState.meta);
+    return;
+  }
+  const originalProjectLead = card.projectLead;
+  const originalLastUpdated = card.lastUpdated;
+  const originalUpdatedBy = card.updatedBy;
+  const before = fieldSnapshot(card);
+  card.projectLead = nextLead;
+  const stamp = nowStamp();
+  card.lastUpdated = stamp;
+  card.updatedBy = getUpdatedBy();
+  const after = fieldSnapshot(card);
+  const diff = changedOnly(before, after);
+  const event = {
+    timestamp: stamp,
+    cardId: card.id,
+    cardTitle: card.title,
+    action: "change_project_lead",
+    updatedBy: card.updatedBy,
+    actor: card.updatedBy || "unknown",
+    before: diff.before,
+    after: diff.after,
+    note: 'Project lead changed from "' + (beforeLead || "Unassigned") + '" to "' + (nextLead || "Unassigned") + '"'
+  };
+  Object.assign(event, structuredActivity("change_project_lead", diff));
+  try {
+    await postJson("api/card-updates", event);
+    rememberAuditUpdate(event);
+    appState.payload.projects = appState.projects;
+    await postJson("api/projects", appState.payload);
+    await loadLatestProjectsFromServer("Saved and synced");
+    renderReviewCurrent();
+  } catch (err) {
+    showNotice("Save failed. Audit/data not updated: " + err.message, "error");
+    if (originalProjectLead === undefined) delete card.projectLead;
+    else card.projectLead = originalProjectLead;
+    card.lastUpdated = originalLastUpdated;
+    card.updatedBy = originalUpdatedBy;
+    render(appState.projects, appState.meta);
+  }
+}
+function countReviewAction(action) {
+  appState.reviewStats.reviewed++;
+  if (action === "save_update") appState.reviewStats.updated++;
+  if (action === "reviewed_no_change") appState.reviewStats.noChange++;
+  if (action === "mark_blocked") appState.reviewStats.blocked++;
+  if (action === "mark_done") appState.reviewStats.completed++;
+}
+function buildReviewQueue() {
+  const score = t => {
+    const due = daysUntil(t.reviewDate);
+    const stale = daysSince(t.lastUpdated);
+    if (due !== null && due < 0) return 1;
+    if (t.status === "blocked") return 2;
+    if (stale === null || stale >= 14) return 3;
+    if (!t.nextAction) return 4;
+    if (!t.owner) return 5;
+    if (due !== null && due <= 7) return 6;
+    return 20;
+  };
+  return appState.projects.filter(t => score(t) < 20).sort((a,b) => score(a) - score(b));
+}
+function startReviewMode() {
+  appState.reviewQueue = buildReviewQueue();
+  appState.reviewIndex = 0;
+  appState.reviewStats = { reviewed: 0, updated: 0, noChange: 0, blocked: 0, completed: 0 };
+  document.getElementById("summaryBox").classList.remove("open");
+  renderReviewCurrent();
+}
+function renderReviewCurrent() {
+  if (!appState.reviewStats) return;
+  const box = document.getElementById("reviewCard");
+  if (appState.reviewIndex >= appState.reviewQueue.length) {
+    const unhealthy = appState.projects.filter(t => healthFor(t) !== "Healthy" && t.status !== "done").length;
+    const s = appState.reviewStats;
+    const md = [
+      "## SAMI Kanban Management Summary",
+      "",
+      "- Reviewed: " + s.reviewed,
+      "- Updated: " + s.updated,
+      "- No change: " + s.noChange,
+      "- Waiting / blocked: " + s.blocked,
+      "- Completed: " + s.completed,
+      "- Still unhealthy: " + unhealthy
+    ].join("\n");
+    box.classList.remove("open");
+    document.getElementById("summaryText").value = md;
+    document.getElementById("summaryBox").classList.add("open");
+    return;
+  }
+  const t = appState.reviewQueue[appState.reviewIndex];
+  box.classList.add("open");
+  box.innerHTML = '<h2>' + esc(t.title) + '</h2>' +
+    '<div class="review-fields">' +
+    '<div><b>Status:</b> ' + esc(STATUS_LABELS[t.status] || t.status) + '</div>' +
+    '<div><b>Owner:</b> ' + esc(t.owner || "Missing") + '</div>' +
+    '<div><b>Next Action:</b> ' + esc(t.nextAction || "Missing") + '</div>' +
+    '<div><b>Waiting On:</b> ' + esc(t.waitingOn || "") + '</div>' +
+    '<div><b>Blocker Reason:</b> ' + esc(t.blockerReason || "") + '</div>' +
+    '<div><b>Review Date:</b> ' + esc(t.reviewDate || "Missing") + '</div>' +
+    '<div><b>Last Updated:</b> ' + esc(t.lastUpdated || "Missing") + '</div>' +
+    '<div><b>Evidence / Source:</b> ' + esc(t.evidenceSource || "") + '</div>' +
+    '</div><div class="context">' + esc(t.notes || t.context || "") + '</div>' +
+    '<div class="drawer-actions">' +
+    '<button class="primary" data-review-action="reviewed" data-edit-required>Reviewed Today</button>' +
+    '<button data-review-action="update" data-edit-required>Update</button>' +
+    '<button class="danger" data-review-action="blocked" data-edit-required>Blocked</button>' +
+    '<button data-review-action="waiting" data-edit-required>Waiting</button>' +
+    '<button class="good" data-review-action="done" data-edit-required>Done</button>' +
+    '<button data-review-action="skip">Skip</button>' +
+    '</div>';
+  updateEditState();
+}
+function advanceReview() {
+  appState.reviewIndex++;
+  renderReviewCurrent();
+}
+async function reviewQuick(action) {
+  if (!requireUnlocked()) return;
+  const t = appState.reviewQueue[appState.reviewIndex];
+  const idx = cardById(t.id);
+  if (idx < 0) return advanceReview();
+  appState.editingIndex = idx;
+  if (action === "reviewed") await persistCard("reviewed_no_change", "Reviewed in review mode", c => c.reviewDate = c.reviewDate);
+  if (action === "blocked") await persistCard("mark_blocked", "Marked blocked in review mode", c => { c.status = "blocked"; c.riskColour = "red"; c.blockerReason = c.blockerReason || "Needs blocker reason"; c.blocked = c.blockerReason; });
+  if (action === "waiting") await persistCard("mark_waiting", "Marked waiting in review mode", c => { c.status = "blocked"; c.waitingOn = c.waitingOn || "TBA"; c.blockerReason = c.blockerReason || "Waiting on " + c.waitingOn; c.blocked = c.blockerReason; });
+  if (action === "done") await persistCard("mark_done", "Marked done in review mode", c => { c.status = "done"; c.completedDate = c.completedDate || todayDate(); c.completedOutcome = c.completedOutcome || "Completed during review"; });
+  advanceReview();
+}
+function bindEvents() {
+  document.body.addEventListener("click", function(e) {
+    if (e.target.closest("#splash")) {
+      if (splashCanDismiss) hideSplash();
+      return;
+    }
+    if (!e.target.closest(".presentation-help-wrap")) {
+      closePresentationHelp();
+    }
+    const recentId = e.target.closest("[data-recent-card]");
+    if (recentId) {
+      focusCard(recentId.getAttribute("data-recent-card"));
+      return;
+    }
+    if (e.target.id === "recentToggle") {
+      appState.recentFilter = !appState.recentFilter;
+      renderRecentlyUpdatedStrip();
+      return;
+    }
+    const detailsButton = e.target.closest("[data-details]");
+    if (detailsButton) {
+      toggleCardDetails(detailsButton.getAttribute("data-details"));
+      return;
+    }
+    const detailsActivityToggle = e.target.closest("[data-details-activity-toggle]");
+    if (detailsActivityToggle) {
+      const id = detailsActivityToggle.getAttribute("data-details-activity-toggle");
+      appState.detailsActivityExpanded[id] = !appState.detailsActivityExpanded[id];
+      refreshOpenCardDetails();
+      return;
+    }
+    const removeId = e.target.getAttribute("data-present-remove");
+    if (removeId) {
+      setPresentationSelected(removeId, false);
+      render(appState.projects, appState.meta);
+      renderPresentationSetup();
+      return;
+    }
+    const moveId = e.target.getAttribute("data-present-move");
+    if (moveId) {
+      movePresentationCard(moveId, e.target.getAttribute("data-dir"));
+      return;
+    }
+    const folderButton = e.target.closest("[data-folder]");
+    if (folderButton) {
+      openProjectFolder(folderButton.getAttribute("data-folder"));
+      return;
+    }
+    const editId = e.target.getAttribute("data-edit");
+    if (editId) {
+      closeCardDetails();
+      if (!requireUnlocked()) return;
+      const idx = cardById(editId);
+      if (idx >= 0) openDrawer(idx);
+    }
+    const action = e.target.getAttribute("data-review-action");
+    if (action === "skip") return advanceReview();
+    if (action === "update") {
+      const current = appState.reviewQueue[appState.reviewIndex];
+      const idx = cardById(current.id);
+      if (idx >= 0) openDrawer(idx);
+    }
+    if (["reviewed","blocked","waiting","done"].includes(action)) reviewQuick(action);
+  });
+  document.body.addEventListener("change", function(e) {
+    const leadId = e.target.getAttribute("data-lead-input");
+    if (leadId) {
+      persistLeadChange(leadId, e.target.value);
+      return;
+    }
+    const selectId = e.target.getAttribute("data-present-select");
+    if (selectId) {
+      setPresentationSelected(selectId, e.target.checked);
+      renderPresentationSetup();
+    }
+    const pickId = e.target.getAttribute("data-present-pick");
+    if (pickId) {
+      setPresentationSelected(pickId, e.target.checked);
+      render(appState.projects, appState.meta);
+      renderPresentationSetup();
+    }
+  });
+  document.body.addEventListener("focusout", function() {
+    if (!appState.sync.pending) return;
+    setTimeout(() => {
+      if (!isEditingActive()) applyPendingSync().catch(err => showNotice("Sync refresh failed: " + err.message, "error"));
+    }, 0);
+  });
+  document.body.addEventListener("keydown", function(e) {
+    const leadId = e.target.getAttribute("data-lead-input");
+    if (!leadId) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.target.blur();
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      render(appState.projects, appState.meta);
+    }
+  });
+  document.addEventListener("keydown", function(e) {
+    const overlayOpen = document.getElementById("presentationOverlay").classList.contains("open");
+    if (!overlayOpen) {
+      if (e.key === "Escape" && projectModalOpen()) {
+        e.preventDefault();
+        closeProjectModal();
+      } else if (e.key === "Escape" && splashCanDismiss) hideSplash();
+      return;
+    }
+    if (e.key === "+" || e.key === "=") {
+      e.preventDefault();
+      presentationNext();
+    }
+    if (e.key === "-" || e.key === "_") {
+      e.preventDefault();
+      presentationPrev();
+    }
+    if (e.key === "?") {
+      e.preventDefault();
+      const help = document.getElementById("presentationHelp");
+      setPresentationHelpOpen(!help.classList.contains("open"));
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      if (document.getElementById("presentationHelp").classList.contains("open")) closePresentationHelp();
+      else exitPresentation();
+    }
+    if (e.key === "f" || e.key === "F") {
+      e.preventDefault();
+      requestPresentationFullscreen();
+    }
+  });
+  document.getElementById("drawerBackdrop").onclick = closeDrawer;
+  document.getElementById("cancelBtn").onclick = closeDrawer;
+  document.getElementById("saveBtn").onclick = () => persistCard("save_update", document.getElementById("fNotes").value.trim());
+  document.getElementById("reviewedBtn").onclick = () => persistCard("reviewed_no_change", "Reviewed today");
+  document.getElementById("blockedBtn").onclick = () => persistCard("mark_blocked", "Marked blocked", c => { readFormInto(c); c.status = "blocked"; c.riskColour = "red"; c.blockerReason = c.blockerReason || "Needs blocker reason"; c.blocked = c.blockerReason; });
+  document.getElementById("waitingBtn").onclick = () => persistCard("mark_waiting", "Marked waiting", c => { readFormInto(c); c.status = "blocked"; c.waitingOn = c.waitingOn || "TBA"; c.blockerReason = c.blockerReason || "Waiting on " + c.waitingOn; c.blocked = c.blockerReason; });
+  document.getElementById("doneBtn").onclick = () => persistCard("mark_done", "Marked done", c => { readFormInto(c); c.status = "done"; c.completedDate = c.completedDate || todayDate(); c.completedOutcome = c.completedOutcome || "Completed"; });
+  document.getElementById("addProjectBtn").onclick = openProjectModal;
+  document.getElementById("closeProjectModalBtn").onclick = closeProjectModal;
+  document.getElementById("cancelNewProjectBtn").onclick = closeProjectModal;
+  document.getElementById("cancelBulkBtn").onclick = closeProjectModal;
+  document.getElementById("singleProjectTab").onclick = () => setProjectMode("single");
+  document.getElementById("bulkProjectTab").onclick = () => setProjectMode("bulk");
+  document.getElementById("pTitle").oninput = e => {
+    document.getElementById("projectSlugPreview").textContent = uniqueProjectId(e.target.value || "project");
+  };
+  document.getElementById("saveNewProjectBtn").onclick = saveSingleProject;
+  document.getElementById("previewBulkBtn").onclick = () => {
+    appState.bulkRows = parseBulkProjects(document.getElementById("bulkProjectText").value);
+    renderBulkPreview();
+  };
+  document.getElementById("saveBulkBtn").onclick = async () => {
+    const button = document.getElementById("saveBulkBtn");
+    const validEntries = (appState.bulkRows || []).filter(row => row.valid).map(row => row.entry);
+    if (!validEntries.length) return;
+    button.disabled = true;
+    try {
+      if (await saveNewProjects(validEntries, document.getElementById("bulkCreateFolders").checked)) closeProjectModal();
+    } catch (err) {
+      document.getElementById("bulkProjectError").textContent = "Save failed: " + err.message;
+    } finally {
+      button.disabled = false;
+    }
+  };
+  document.getElementById("projectModal").onclick = e => {
+    if (e.target.id === "projectModal") closeProjectModal();
+  };
+  document.getElementById("reviewBtn").onclick = startReviewMode;
+  document.getElementById("healthBtn").onclick = () => document.getElementById("healthPanel").classList.toggle("open");
+  document.getElementById("presentationBtn").onclick = launchPresentation;
+  document.getElementById("cancelPresentationBtn").onclick = closePresentationSetup;
+  document.getElementById("presentationFilter").onchange = renderPresentationSetup;
+  document.getElementById("selectVisibleBtn").onclick = () => {
+    visiblePresentationCards().forEach(t => setPresentationSelected(t.id, true));
+    render(appState.projects, appState.meta);
+    renderPresentationSetup();
+  };
+  document.getElementById("clearPresentationBtn").onclick = () => {
+    appState.presentationIds = [];
+    savePresentationSelection();
+    render(appState.projects, appState.meta);
+    renderPresentationSetup();
+  };
+  document.getElementById("launchPresentationBtn").onclick = launchPresentation;
+  document.getElementById("presentationPrevBtn").onclick = presentationPrev;
+  document.getElementById("presentationNextBtn").onclick = presentationNext;
+  document.getElementById("presentationFullscreenBtn").onclick = requestPresentationFullscreen;
+  document.getElementById("presentationExitBtn").onclick = exitPresentation;
+  document.getElementById("presentationHelpBtn").onclick = (e) => {
+    e.stopPropagation();
+    const help = document.getElementById("presentationHelp");
+    setPresentationHelpOpen(!help.classList.contains("open"));
+  };
+  document.getElementById("overviewToggle").onclick = () => {
+    const panel = document.getElementById("overviewPanel");
+    setOverviewOpen(!panel.classList.contains("open"), true);
+  };
+  document.getElementById("reloadBtn").onclick = () => location.reload();
+  document.getElementById("unlockBtn").onclick = async () => {
+    clearNotice();
+    const pin = prompt("Enter edit PIN");
+    if (pin === null) return;
+    try {
+      const r = await fetch("api/unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ pin: pin })
+      });
+      const payload = await r.json();
+      if (!r.ok || payload.ok === false) throw new Error(payload.error || ("HTTP " + r.status));
+      setEditSession(payload.token, payload.expires);
+      showNotice(payload.warning || "Editing unlocked for this browser session.", "ok");
+      render(appState.projects, appState.meta);
+    } catch (err) {
+      clearEditSession();
+      showNotice("Unlock failed: " + err.message, "error");
+    }
+  };
+  document.getElementById("lockBtn").onclick = () => {
+    if (projectModalOpen()) closeProjectModal();
+    clearEditSession();
+    showNotice("Editing locked.", "ok");
+    render(appState.projects, appState.meta);
+  };
+  document.addEventListener("visibilitychange", requestSyncCheck);
+  window.addEventListener("focus", requestSyncCheck);
+  document.getElementById("copySummaryBtn").onclick = async () => {
+    const text = document.getElementById("summaryText").value;
+    try {
+      await navigator.clipboard.writeText(text);
+      showNotice("Markdown summary copied.", "ok");
+    } catch (_) {
+      document.getElementById("summaryText").select();
+      document.execCommand("copy");
+      showNotice("Markdown summary selected and copied.", "ok");
+    }
+  };
+}
+
+async function boot() {
+  try {
+    bindEvents();
+    startHeaderClock();
+    loadProjectFileIndex();
+    appState.cardActivityLoadPromise = loadCardActivityIndex();
+    loadOverviewState();
+    loadPresentationSelection();
+    loadEditSession();
+    const initialSync = await fetchSyncStatus();
+    const [dataResp, configResp, userResp] = await Promise.all([
+      fetch('data/projects.json', { cache: 'no-store' }),
+      fetch('data/kanban_config.json', { cache: 'no-store' }).catch(() => null),
+      fetch('api/user', { cache: 'no-store' }).catch(() => null)
+    ]);
+    if (!dataResp.ok) throw new Error('HTTP ' + dataResp.status);
+    appState.payload = await dataResp.json();
+    rememberSyncStatus(initialSync);
+    if (configResp && configResp.ok) appState.config = Object.assign({}, DEFAULT_CONFIG, await configResp.json());
+    if (userResp && userResp.ok) {
+      const user = await userResp.json();
+      setUpdatedBy(user.username || "Unknown");
+    }
+    await loadAuditUpdates();
+    render(appState.payload.projects || [], appState.payload.meta || {});
+    startSyncPolling();
+    markSplashReady();
+  } catch (err) {
+    setSplashError("Could not load project portfolio.");
+    document.getElementById('board').innerHTML = '<div class="error">Could not load Kanban data. Error: ' + esc(err.message) + '</div>';
+  }
+}
+boot();
+</script>
+</body>
+</html>

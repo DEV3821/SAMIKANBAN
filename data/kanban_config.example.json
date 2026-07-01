@@ -1,0 +1,17 @@
+{
+  "wipLimits": { "Blocked": 20, "Ready": 20, "In Progress": 10, "Done": 50 },
+  "staleThresholdDays": 14,
+  "blockedThresholdDays": 7,
+  "editProtection": {
+    "enabled": false,
+    "pinHash": "",
+    "hashAlgorithm": "SHA256",
+    "sessionMinutes": 120
+  },
+  "columnPolicies": {
+    "Blocked": "Record the blocker and responsible party.",
+    "Ready": "Ready work should have a clear next action.",
+    "In Progress": "Active work should have an owner and review date.",
+    "Done": "Completed work should record an outcome."
+  }
+}

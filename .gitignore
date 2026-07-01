@@ -1,0 +1,86 @@
+﻿# Logs / runtime / local mirror
+logs/
+runtime/
+site/
+*.log
+
+# Backups
+*.bak
+*.bak-*
+*.backup
+*.old
+*.tmp
+data/*.backup.json
+
+# Kanban audit/update stream
+data/card_updates.jsonl
+data/card_updates.jsonl.*
+
+# Windows noise
+Thumbs.db
+Desktop.ini
+
+# Temporary validation/runtime test folders
+tmp/
+
+# Project document folders (shared documents must never be committed)
+project_files/**
+!project_files/.keep
+
+# Live board data - do not publish
+data/*
+!data/*.example.json
+!data/app_version.json
+data/projects.json
+data/card_updates.jsonl
+data/card_updates.jsonl.*
+data/kanban_config.json
+data/project_file_index.json
+data/card_activity_index.json
+data/*.bak
+data/*.backup
+data/*.tmp
+
+# Project files and uploaded documents
+project_files/
+**/project_files/
+
+# Operational documentation and generated reports
+docs/
+
+# Logs/runtime
+logs/
+*.log
+*.pid
+*.lock
+
+# Runtime/local mirrors
+site/
+runtime/
+.local/
+.localappdata/
+
+# Backups/recovery
+backups/
+backup/
+RECOVERY_*/
+*_backup_*/
+*.bak-*
+
+# Local operational utilities
+tools/apply_robyn_feedback.ps1
+tools/test_sync_workflow.ps1
+tools/test_sync_workflow.bat
+tools/build_card_activity_index.py
+CHANGELOG.md
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Temp files
+*.tmp

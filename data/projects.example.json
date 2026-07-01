@@ -1,0 +1,55 @@
+{
+  "meta": {
+    "name": "Example Kanban Portfolio",
+    "generated": "2026-01-01T09:00:00",
+    "source": "sanitised-example",
+    "notes": "Fake example data for local development only.",
+    "statuses": ["backlog", "running", "blocked", "done"]
+  },
+  "projects": [
+    {
+      "id": "example-project-alpha",
+      "title": "Example Project Alpha",
+      "status": "running",
+      "context": "Demonstrates a generic active project.",
+      "nextAction": "Confirm the next example milestone.",
+      "owner": "Example Owner",
+      "projectLead": "Example Lead",
+      "reviewDate": "2026-01-15",
+      "lastUpdated": "2026-01-01T09:00:00",
+      "updatedBy": "example-user",
+      "riskColour": "green",
+      "priority": "medium",
+      "blockerReason": "",
+      "waitingOn": "",
+      "evidenceSource": "",
+      "notes": "",
+      "completedDate": "",
+      "completedOutcome": "",
+      "people": [],
+      "tags": ["example"]
+    },
+    {
+      "id": "example-project-beta",
+      "title": "Example Project Beta",
+      "status": "backlog",
+      "context": "Demonstrates a generic backlog project.",
+      "nextAction": "Assign an example owner.",
+      "owner": "",
+      "projectLead": "",
+      "reviewDate": "",
+      "lastUpdated": "2026-01-01T09:00:00",
+      "updatedBy": "example-user",
+      "riskColour": "amber",
+      "priority": "low",
+      "blockerReason": "",
+      "waitingOn": "",
+      "evidenceSource": "",
+      "notes": "",
+      "completedDate": "",
+      "completedOutcome": "",
+      "people": [],
+      "tags": ["example"]
+    }
+  ]
+}
