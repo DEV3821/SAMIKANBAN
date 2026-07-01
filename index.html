@@ -4,7 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SAMI Project Portfolio</title>
-<link rel="icon" href="data:,">
+<meta name="application-name" content="SAMI Project Portfolio">
+<meta name="theme-color" content="#00768e">
+<meta name="msapplication-TileColor" content="#00768e">
+<meta name="msapplication-TileImage" content="assets/icons/sami_project_portfolio-192.png?v=2026.07.01.195055">
+<link rel="icon" href="assets/sami_project_portfolio.ico?v=2026.07.01.195055" sizes="any">
+<link rel="icon" href="assets/icons/sami_project_portfolio-192.png?v=2026.07.01.195055" type="image/png" sizes="192x192">
+<link rel="apple-touch-icon" href="assets/icons/sami_project_portfolio-192.png?v=2026.07.01.195055" sizes="192x192">
+<link rel="manifest" href="manifest.webmanifest?v=2026.07.01.195055">
 <style>
   :root {
     --sa-blue: #005EB8;
@@ -207,11 +214,10 @@
   }
   .sync-dot { width: 0.58rem; height: 0.58rem; border-radius: 50%; background: var(--running); box-shadow: 0 0 0 3px rgba(0,94,184,0.10); }
   .sync-indicator.synced .sync-dot { background: var(--ready); box-shadow: 0 0 0 3px rgba(0,168,137,0.12); }
-  .sync-indicator.warning .sync-dot { background: var(--next); box-shadow: 0 0 0 3px rgba(181,107,10,0.12); }
-  .sync-indicator.offline .sync-dot { background: var(--blocked); box-shadow: 0 0 0 3px rgba(214,69,69,0.12); }
+  .sync-indicator.warning .sync-dot, .sync-indicator.offline .sync-dot { background: var(--next); box-shadow: 0 0 0 3px rgba(181,107,10,0.12); }
+  .sync-indicator.error .sync-dot { background: var(--blocked); box-shadow: 0 0 0 3px rgba(214,69,69,0.12); }
   .sync-copy { min-width: 0; }
   .sync-label { display: block; color: var(--sa-blue-dark); font-size: 0.7rem; line-height: 1.2; font-weight: 800; }
-  .sync-meta { display: block; margin-top: 0.08rem; color: var(--muted); font-size: 0.61rem; line-height: 1.2; white-space: nowrap; }
   .sync-clock { padding-left: 0.5rem; border-left: 1px solid var(--line); color: var(--charcoal); font-size: 0.68rem; font-weight: 750; white-space: nowrap; }
   .overview-panel {
     margin-bottom: 0.65rem;
@@ -527,6 +533,7 @@
   .folder-dot { width:0.48rem; height:0.48rem; border-radius:50%; background:#9ca3af; box-shadow:0 0 0 2px rgba(156,163,175,0.14); }
   .folder-dot.canonical { background:var(--ready); box-shadow:0 0 0 2px rgba(0,168,137,0.15); }
   .folder-dot.warning { background:var(--next); box-shadow:0 0 0 2px rgba(217,119,6,0.15); }
+  .folder-dot.error { background:var(--blocked); box-shadow:0 0 0 2px rgba(214,69,69,0.15); }
   .folder-dot.none { background:#9ca3af; }
   .project-modal { position:fixed; inset:0; z-index:125; display:none; place-items:center; padding:1rem; background:rgba(17,24,39,0.52); }
   .project-modal.open { display:grid; }
@@ -1357,6 +1364,11 @@
       justify-content: flex-end;
     }
   }
+  .app-version-meta { margin-top:0.3rem; color:#d9f5f5; font-size:0.72rem; text-align:right; }
+  .app-update-banner { display:none; align-items:center; justify-content:center; gap:0.75rem; padding:0.65rem 1rem; background:#e7f8f7; color:#064e55; border-bottom:1px solid #8ed8d4; font-size:0.88rem; }
+  .app-update-banner.open { display:flex; }
+  .app-update-banner button { border-color:#087f8c; background:#fff; color:#075d66; font-weight:700; }
+  body.presentation-active .app-update-banner { display:none !important; }
 </style>
 </head>
 <body>
@@ -1386,14 +1398,16 @@
     <div class="header-right">
       <div class="sync-indicator" id="syncIndicator" role="status" aria-live="polite">
         <span class="sync-dot" aria-hidden="true"></span>
-        <span class="sync-copy"><span class="sync-label" id="syncLabel">Checking Team ESMI…</span><span class="sync-meta" id="syncMeta">Connecting to the canonical source</span></span>
+        <span class="sync-copy"><span class="sync-label" id="syncLabel">Checking Team ESMI…</span></span>
         <span class="sync-clock" id="syncClock">--:--</span>
       </div>
+      <div class="app-version-meta" id="appVersionMeta">App: unknown</div>
     </div>
   </div>
 </div>
 
 <div class="notice" id="notice"></div>
+<div class="app-update-banner" id="appUpdateBanner" role="status" aria-live="polite"><span id="appUpdateMessage"></span><button id="appUpdateRefreshBtn" type="button">Refresh now</button></div>
 <div class="toolbar">
   <button class="primary" id="addProjectBtn" data-edit-required hidden>Add Project</button>
   <button class="primary" id="reviewBtn">Review Cards</button>
@@ -1660,13 +1674,28 @@ let appState = {
   presentationIds: [],
   presentationIndex: 0,
   presentationDensity: 1,
-  sync: { projectsRevision: "", auditRevision: "", pending: null, polling: false, timer: null, lastStatus: null, lastCheckedAt: null, lastError: "", clockTimer: null }
+  saving: false,
+  appVersion: { loadedVersion: "", status: null, timer: null, checking: false },
+  sync: {
+    projectsRevision: "", auditRevision: "", pending: null, timer: null, countdownTimer: null, lastStatus: null, lastError: "", lastSuccessMessage: "",
+    lastSyncStartedAt: null, lastSyncSucceededAt: null, lastSyncFailedAt: null, nextSyncDueAt: null,
+    isEditing: false, teamReachable: null, syncInFlight: false
+  }
 };
 let splashReady = false;
 let splashCanDismiss = false;
 
+function displayText(s) {
+  return String(s || "")
+    .replace(/\u00e2\u20ac\u201d/g, "\u2014")
+    .replace(/\u00e2\u20ac\u201c/g, "\u2013")
+    .replace(/\u00e2\u20ac\u2122/g, "\u2019")
+    .replace(/\u00e2\u2020\u2019/g, "\u2192")
+    .replace(/\u00e2\u2020\u201d/g, "\u2194")
+    .replace(/\u00c2\u00b7/g, "\u00b7");
+}
 function esc(s) {
-  return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  return displayText(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 function attr(s) { return esc(s).replace(/"/g,"&quot;"); }
 function todayDate() { return new Date().toLocaleDateString("en-CA"); }
@@ -1985,7 +2014,8 @@ function openProjectModal() {
 }
 function closeProjectModal() {
   const modal = document.getElementById("projectModal"); modal.classList.remove("open"); modal.hidden = true;
-  setTimeout(() => { if (!isEditingActive()) applyPendingSync().catch(err => showNotice("Sync refresh failed: " + err.message, "error")); }, 0);
+  setTimeout(() => resumeSyncAfterEditing(true), 0);
+  renderAppVersion();
 }
 function normalizeImportedStatus(value) {
   const key = String(value || "").trim().toLowerCase().replace(/[ _-]+/g, "");
@@ -2116,21 +2146,27 @@ async function openProjectFolder(id) {
   const index = cardById(id); if (index < 0) return;
   const card = appState.projects[index], folder = folderMetadata(card);
   if (!folder) { if (appState.editingUnlocked) return createFolderForCard(id); showNotice("No folder linked. Unlock editing to create a project folder.", "error"); return; }
-  try { const result = await postJson("api/project-folder/open", { relativePath:folder.relativePath }); if ((result.warnings || []).length) showNotice(result.warnings.join(" "), "error"); }
+  try {
+    const result = await postJson("api/project-folder/open", { projectId:id, relativePath:folder.relativePath });
+    if (!result.opened && result.source !== "team-esmi") showNotice("Files folder is local-only or Team ESMI could not be confirmed.", "ok");
+    else if ((result.warnings || []).length) showNotice(result.warnings.join(" "), "error");
+  }
   catch (err) { showNotice("Could not open project folder: " + err.message, "error"); }
 }
 function updateFolderIndicator(id) {
   const status = appState.folderStatuses[id], dot = document.querySelector('[data-folder-dot="' + CSS.escape(id) + '"]'), button = document.querySelector('[data-folder="' + CSS.escape(id) + '"]');
   if (!dot || !button) return;
   const index = cardById(id), linked = index >= 0 ? folderMetadata(appState.projects[index]) : null;
-  dot.className = "folder-dot " + (!linked ? "none" : status && status.existsCanonical ? "canonical" : "warning");
-  button.title = !linked ? (appState.editingUnlocked ? "Create project folder" : "No folder linked") : status && status.existsCanonical ? "Open Team ESMI project folder" : "Folder missing or Team ESMI unavailable";
+  const colour = !linked ? "grey" : status && status.statusColor ? status.statusColor : "orange";
+  const cssClass = colour === "green" ? "canonical" : colour === "red" ? "error" : colour === "grey" ? "none" : "warning";
+  dot.className = "folder-dot " + cssClass;
+  button.title = colour === "green" ? "Files folder is on Team ESMI" : colour === "red" ? "Folder check failed" : colour === "grey" ? "Files folder not created yet" : "Files folder is local-only or Team ESMI could not be confirmed";
 }
 async function refreshFolderStatuses() {
   const linkedCards = appState.projects.filter(folderMetadata);
   await Promise.all(linkedCards.map(async card => {
-    try { const r = await fetch("api/project-folder/status?relativePath=" + encodeURIComponent(card.folder.relativePath), { cache:"no-store" }); const status = await r.json(); appState.folderStatuses[card.id] = r.ok ? status : { existsCanonical:false, warnings:[status.error || "Status unavailable"] }; }
-    catch (_) { appState.folderStatuses[card.id] = { existsCanonical:false, warnings:["Status unavailable"] }; }
+    try { const r = await fetch("api/project-folder/status?projectId=" + encodeURIComponent(card.id) + "&relativePath=" + encodeURIComponent(card.folder.relativePath), { cache:"no-store" }); const status = await r.json(); appState.folderStatuses[card.id] = r.ok ? status : { statusColor:"red", existsCanonical:false, message:"Folder check failed", warnings:[status.error || "Status unavailable"] }; }
+    catch (_) { appState.folderStatuses[card.id] = { statusColor:"red", existsCanonical:false, message:"Folder check failed", warnings:["Status unavailable"] }; }
     updateFolderIndicator(card.id);
   }));
 }
@@ -2286,49 +2322,106 @@ function latestTeamDataRevision(status) {
   return values.length ? new Date(Math.max(...values.map(value => value.getTime()))) : null;
 }
 function renderSyncIndicator() {
-  const root = document.getElementById("syncIndicator"), label = document.getElementById("syncLabel"), meta = document.getElementById("syncMeta"), clock = document.getElementById("syncClock");
-  if (!root || !label || !meta || !clock) return;
+  const root = document.getElementById("syncIndicator"), label = document.getElementById("syncLabel"), clock = document.getElementById("syncClock");
+  if (!root || !label || !clock) return;
+  const now = Date.now();
   const status = appState.sync.lastStatus;
   const source = status && status.source, local = status && status.local;
   const sourceReady = !!(source && source.projects && source.projects.exists && source.audit && source.audit.exists);
   const localReady = !!(local && local.projects && local.projects.exists && local.audit && local.audit.exists);
   const matching = sourceReady && localReady && source.projects.hash === local.projects.hash && source.audit.hash === local.audit.hash;
-  let state = "checking", text = "Checking Team ESMI…";
-  if (appState.sync.lastError) { state = "offline"; text = "Team ESMI check failed"; }
-  else if (appState.sync.pending) { state = "warning"; text = "Team ESMI update available"; }
-  else if (matching) { state = "synced"; text = "Team ESMI synced"; }
-  else if (status) { state = "warning"; text = sourceReady ? "Sync needs attention" : "Team ESMI unavailable"; }
+  appState.sync.isEditing = appState.saving || isEditingActive();
+  const lastSucceeded = appState.sync.lastSyncSucceededAt;
+  const lastFailed = appState.sync.lastSyncFailedAt;
+  const failedMostRecently = !!(lastFailed && (!lastSucceeded || lastFailed >= lastSucceeded));
+  let state = "checking", text = "Checking Team ESMI…", detail = "Connecting to the canonical source", timerText = "Checking…";
+  if (appState.sync.isEditing) {
+    state = "warning"; text = "Editing — auto-sync paused"; detail = lastSucceeded ? "Last checked " + relativeSyncTime(lastSucceeded, now) : "No successful Team check yet"; timerText = "Paused";
+  } else if (appState.sync.syncInFlight) {
+    detail = lastSucceeded ? "Last checked " + relativeSyncTime(lastSucceeded, now) : "Connecting to the canonical source"; timerText = "Checking…";
+  } else if (failedMostRecently || (status && status.mode === "error")) {
+    state = "error"; text = "Sync check failed"; detail = appState.sync.lastError || "Invalid sync response"; timerText = retryCountdown(now);
+  } else if (status && !appState.sync.teamReachable) {
+    state = "offline"; text = "Team ESMI unavailable"; detail = "Using local runtime view"; timerText = retryCountdown(now);
+  } else if (appState.sync.pending) {
+    state = "warning"; text = "Team ESMI update available"; detail = "Save or cancel the current edit to refresh"; timerText = "Paused";
+  } else if (status && status.teamReachable && status.mode === "team-canonical" && matching) {
+    state = "synced";
+    const justSaved = appState.sync.lastSuccessMessage && /^Saved/i.test(appState.sync.lastSuccessMessage) && lastSucceeded && now - lastSucceeded < 10000;
+    text = justSaved ? "Saved and synced to Team ESMI" : "Team ESMI synced";
+    detail = justSaved ? "Just now" : "Last checked " + relativeSyncTime(lastSucceeded, now);
+    timerText = justSaved ? "Current" : nextCheckCountdown(now);
+  } else if (status) {
+    state = "error"; text = "Sync check failed"; detail = "Canonical/runtime data status is inconsistent"; timerText = retryCountdown(now);
+  }
   root.className = "sync-indicator " + state;
   label.textContent = text;
-  const revised = latestTeamDataRevision(status);
-  const checked = appState.sync.lastCheckedAt ? adelaideTime(appState.sync.lastCheckedAt, false) : "not yet";
-  meta.textContent = (revised ? "Data " + adelaideTime(revised, true) : "Data revision unavailable") + " · checked " + checked;
-  clock.textContent = adelaideTime(new Date(), false);
-  root.title = appState.sync.lastError || (matching ? "Local runtime matches the Team ESMI canonical projects and activity data." : text);
+  clock.textContent = adelaideTime(new Date(now), false);
+  root.title = appState.sync.lastError || (state === "synced" ? "Local runtime matches the Team ESMI canonical projects and activity data." : text);
 }
-function recordSyncCheck(status, error) {
+function relativeSyncTime(timestamp, now) {
+  if (!timestamp) return "not yet";
+  const seconds = Math.max(0, Math.floor((now - timestamp) / 1000));
+  if (seconds < 2) return "just now";
+  if (seconds < 60) return seconds + "s ago";
+  return Math.floor(seconds / 60) + "m ago";
+}
+function nextCheckCountdown(now) {
+  if (!appState.sync.nextSyncDueAt) return "Next check pending";
+  return "Next check in " + Math.max(0, Math.ceil((appState.sync.nextSyncDueAt - now) / 1000)) + "s";
+}
+function retryCountdown(now) {
+  if (!appState.sync.nextSyncDueAt) return "Retry pending";
+  return "Retrying in " + Math.max(0, Math.ceil((appState.sync.nextSyncDueAt - now) / 1000)) + "s";
+}
+function syncStatusIsHealthy(status) {
+  const source = status && status.source, local = status && status.local;
+  return !!(status && status.teamReachable && status.mode === "team-canonical" && source && local &&
+    source.projects && source.projects.exists && source.audit && source.audit.exists &&
+    local.projects && local.projects.exists && local.audit && local.audit.exists &&
+    source.projects.hash === local.projects.hash && source.audit.hash === local.audit.hash);
+}
+function recordSyncCheck(status, error, successMessage) {
+  const now = Date.now();
   if (status) {
     appState.sync.lastStatus = status;
-    appState.sync.lastCheckedAt = new Date();
-    appState.sync.lastError = "";
+    appState.sync.teamReachable = status.teamReachable === true;
+    if (syncStatusIsHealthy(status)) {
+      appState.sync.lastSyncSucceededAt = now;
+      appState.sync.lastSyncFailedAt = null;
+      appState.sync.lastError = "";
+      if (successMessage) appState.sync.lastSuccessMessage = successMessage;
+    } else if (status.teamReachable === false && (status.mode === "offline" || status.mode === "local-fallback")) {
+      appState.sync.lastSyncFailedAt = null;
+      appState.sync.lastError = "";
+      appState.sync.lastSuccessMessage = "";
+    } else {
+      appState.sync.lastSyncFailedAt = now;
+      appState.sync.lastError = "Canonical/runtime data status is inconsistent";
+      appState.sync.lastSuccessMessage = "";
+    }
   } else if (error) {
+    appState.sync.lastSyncFailedAt = now;
     appState.sync.lastError = error.message || String(error);
+    appState.sync.lastSuccessMessage = "";
   }
   renderSyncIndicator();
 }
-function startHeaderClock() {
-  if (appState.sync.clockTimer) window.clearInterval(appState.sync.clockTimer);
+function startSyncCountdown() {
+  if (appState.sync.countdownTimer) window.clearInterval(appState.sync.countdownTimer);
   renderSyncIndicator();
-  appState.sync.clockTimer = window.setInterval(renderSyncIndicator, 30000);
+  appState.sync.countdownTimer = window.setInterval(renderSyncIndicator, 1000);
 }
 function sourceProjectsRevision(status) {
+  if (status && status.projectsJson) return status.projectsJson.timestamp || status.projectsJson.lastWriteUtc || "";
   return status && status.source && status.source.projects ? (status.source.projects.lastWriteUtc || "") : "";
 }
 function sourceAuditRevision(status) {
+  if (status && status.cardUpdatesJsonl) return status.cardUpdatesJsonl.timestamp || status.cardUpdatesJsonl.lastWriteUtc || "";
   return status && status.source && status.source.audit ? (status.source.audit.lastWriteUtc || "") : "";
 }
-function rememberSyncStatus(status) {
-  recordSyncCheck(status);
+function rememberSyncStatus(status, successMessage) {
+  recordSyncCheck(status, null, successMessage);
   const projectsRevision = sourceProjectsRevision(status);
   const auditRevision = sourceAuditRevision(status);
   if (projectsRevision) appState.sync.projectsRevision = projectsRevision;
@@ -2345,10 +2438,66 @@ function isPresentationOpen() {
   const overlay = document.getElementById("presentationOverlay");
   return !!(overlay && overlay.classList.contains("open"));
 }
+function appVersionKey(payload) {
+  return payload && typeof payload.version === "string" ? payload.version.trim() : "";
+}
+function appUpdateBlocked() {
+  return appState.saving || isEditingActive();
+}
+function renderAppVersion() {
+  const meta = document.getElementById("appVersionMeta");
+  const banner = document.getElementById("appUpdateBanner");
+  const message = document.getElementById("appUpdateMessage");
+  const refresh = document.getElementById("appUpdateRefreshBtn");
+  if (!meta || !banner || !message || !refresh) return;
+  const status = appState.appVersion.status;
+  const runtimeChanged = !!(status && appState.appVersion.loadedVersion && status.runtimeVersion && status.runtimeVersion !== appState.appVersion.loadedVersion);
+  if (status && (status.updateAvailable || runtimeChanged)) {
+    meta.textContent = "App update available";
+    const blocked = appUpdateBlocked();
+    const restartRequired = status.updateAvailable && !runtimeChanged;
+    message.textContent = blocked
+      ? "Update available — save or cancel your edit, then " + (restartRequired ? "restart SAMI Project Portfolio." : "refresh.")
+      : restartRequired ? "Update available — restart SAMI Project Portfolio to update." : "Update available — refresh to update.";
+    refresh.textContent = restartRequired ? "Restart required" : "Refresh now";
+    refresh.disabled = blocked || restartRequired;
+    banner.classList.add("open");
+  } else {
+    meta.textContent = "App: " + (status && status.runtimeVersion ? status.runtimeVersion : "unknown");
+    banner.classList.remove("open");
+  }
+}
+async function checkAppVersion() {
+  if (appState.appVersion.checking) return;
+  appState.appVersion.checking = true;
+  try {
+    const response = await fetch("api/app-version/status", { cache:"no-store" });
+    const payload = await response.json();
+    if (!response.ok || !payload || payload.ok === false) throw new Error(payload && payload.error ? payload.error : "App update check failed");
+    appState.appVersion.status = payload;
+    if (!appState.appVersion.loadedVersion) appState.appVersion.loadedVersion = String(payload.runtimeVersion || "");
+    renderAppVersion();
+  } catch (_) {
+    // Legacy deployments may not provide app_version.json.
+  } finally {
+    appState.appVersion.checking = false;
+  }
+}
+function refreshForAppUpdate() {
+  if (appUpdateBlocked()) { renderAppVersion(); return; }
+  window.location.reload();
+}
+function startAppVersionMonitoring() {
+  const button = document.getElementById("appUpdateRefreshBtn");
+  if (button) button.onclick = refreshForAppUpdate;
+  if (appState.appVersion.timer) window.clearInterval(appState.appVersion.timer);
+  appState.appVersion.timer = window.setInterval(checkAppVersion, 60000);
+  window.addEventListener("focus", checkAppVersion);
+}
 async function fetchSyncStatus() {
   const r = await fetch("api/sync-status", { cache: "no-store" });
   const payload = await r.json();
-  if (!r.ok || payload.ok === false) throw new Error(payload.error || ("HTTP " + r.status));
+  if (!r.ok || !payload || payload.ok === false || typeof payload.teamReachable !== "boolean" || !payload.mode) throw new Error(payload && payload.error ? payload.error : ("Invalid sync response (HTTP " + r.status + ")"));
   return payload;
 }
 async function loadLatestProjectsFromServer(message) {
@@ -2356,7 +2505,8 @@ async function loadLatestProjectsFromServer(message) {
   const dataResp = await fetch("data/projects.json?ts=" + Date.now(), { cache: "no-store" });
   if (!dataResp.ok) throw new Error("HTTP " + dataResp.status);
   appState.payload = await dataResp.json();
-  rememberSyncStatus(status);
+  rememberSyncStatus(status, message);
+  scheduleNextSync(SYNC_POLL_MS);
   await loadAuditUpdates();
   render(appState.payload.projects || [], appState.payload.meta || {});
   renderReviewCurrent();
@@ -2368,15 +2518,34 @@ async function applyPendingSync() {
   appState.sync.pending = null;
   await loadLatestProjectsFromServer(pending.message || "Updated from Team ESMI");
 }
+function resumeSyncAfterEditing(forceCheck) {
+  if (isEditingActive()) return;
+  renderAppVersion();
+  if (appState.sync.pending) {
+    applyPendingSync().catch(err => showNotice("Sync refresh failed: " + err.message, "error"));
+  } else if (forceCheck) {
+    requestSyncCheck();
+  }
+}
 async function pollSyncStatus() {
-  if (appState.sync.polling) return;
-  appState.sync.polling = true;
+  if (appState.sync.syncInFlight) return;
+  appState.sync.isEditing = appState.saving || isEditingActive();
+  if (appState.sync.isEditing) {
+    appState.sync.nextSyncDueAt = null;
+    renderSyncIndicator();
+    scheduleNextSync(SYNC_POLL_MS);
+    return;
+  }
+  appState.sync.syncInFlight = true;
+  appState.sync.lastSyncStartedAt = Date.now();
+  appState.sync.nextSyncDueAt = null;
+  renderSyncIndicator();
   try {
     const status = await fetchSyncStatus();
     const nextProjectsRevision = sourceProjectsRevision(status);
     const hasLoadedRevision = !!appState.sync.projectsRevision;
     const sourceChanged = hasLoadedRevision && nextProjectsRevision && nextProjectsRevision !== appState.sync.projectsRevision;
-    recordSyncCheck(status);
+    rememberSyncStatus(status);
     if (sourceChanged) {
       if (isEditingActive()) {
         appState.sync.pending = { revision: nextProjectsRevision, message: "Updated from Team ESMI" };
@@ -2385,22 +2554,28 @@ async function pollSyncStatus() {
       } else {
         await loadLatestProjectsFromServer("Updated from Team ESMI");
       }
-    } else {
-      rememberSyncStatus(status);
     }
   } catch (err) {
     recordSyncCheck(null, err);
     console.warn("Sync poll failed", err);
   } finally {
-    appState.sync.polling = false;
+    appState.sync.syncInFlight = false;
+    scheduleNextSync(SYNC_POLL_MS);
+    renderSyncIndicator();
   }
 }
+function scheduleNextSync(delay) {
+  if (appState.sync.timer) window.clearTimeout(appState.sync.timer);
+  appState.sync.nextSyncDueAt = Date.now() + delay;
+  appState.sync.timer = window.setTimeout(pollSyncStatus, delay);
+}
 function startSyncPolling() {
-  if (appState.sync.timer) window.clearInterval(appState.sync.timer);
-  appState.sync.timer = window.setInterval(pollSyncStatus, SYNC_POLL_MS);
+  scheduleNextSync(SYNC_POLL_MS);
 }
 function requestSyncCheck() {
   if (document.visibilityState && document.visibilityState !== "visible") return;
+  if (appState.sync.timer) window.clearTimeout(appState.sync.timer);
+  appState.sync.nextSyncDueAt = Date.now();
   pollSyncStatus();
 }
 async function ensureFreshBeforeSave() {
@@ -2810,7 +2985,8 @@ function renderCard(t) {
   if (t.reviewDate) html += '<span class="badge">Review Date: ' + esc(t.reviewDate) + '</span>';
   const linkedFolder = folderMetadata(t);
   const folderStatus = appState.folderStatuses[t.id];
-  const folderClass = !linkedFolder ? "none" : folderStatus && folderStatus.existsCanonical ? "canonical" : "warning";
+  const folderColour = !linkedFolder ? "grey" : folderStatus && folderStatus.statusColor ? folderStatus.statusColor : "orange";
+  const folderClass = folderColour === "green" ? "canonical" : folderColour === "red" ? "error" : folderColour === "grey" ? "none" : "warning";
   html += '<button class="folder-action" type="button" data-folder="' + attr(t.id) + '"><span class="folder-dot ' + folderClass + '" data-folder-dot="' + attr(t.id) + '"></span>Files</button>';
   html += '</div>';
   html += '<div class="card-activity-line" data-card-activity-for="' + attr(t.id) + '">' + activityLineMarkup(t) + '</div>';
@@ -2959,20 +3135,20 @@ function renderDrawerActivity(card) {
 function openDrawer(index) {
   appState.editingIndex = index;
   const t = appState.projects[index];
-  document.getElementById("drawerTitle").textContent = t.title;
+  document.getElementById("drawerTitle").textContent = displayText(t.title);
   document.getElementById("drawerSubtitle").textContent = "Updated by " + getUpdatedBy();
   document.getElementById("fStatus").innerHTML = COLS.map(c => '<option value="' + c.key + '">' + c.label + '</option>').join("");
   document.getElementById("fStatus").value = normalizeStatus(t.status);
-  document.getElementById("fOwner").value = t.owner || "";
+  document.getElementById("fOwner").value = displayText(t.owner);
   document.getElementById("fRisk").value = t.riskColour || "green";
-  document.getElementById("fNextAction").value = t.nextAction || "";
-  document.getElementById("fWaitingOn").value = t.waitingOn || "";
-  document.getElementById("fBlocker").value = t.blockerReason || "";
+  document.getElementById("fNextAction").value = displayText(t.nextAction);
+  document.getElementById("fWaitingOn").value = displayText(t.waitingOn);
+  document.getElementById("fBlocker").value = displayText(t.blockerReason);
   document.getElementById("fReviewDate").value = t.reviewDate || "";
-  document.getElementById("fEvidence").value = t.evidenceSource || "";
-  document.getElementById("fNotes").value = t.notes || "";
+  document.getElementById("fEvidence").value = displayText(t.evidenceSource);
+  document.getElementById("fNotes").value = displayText(t.notes);
   document.getElementById("fCompletedDate").value = t.completedDate || "";
-  document.getElementById("fCompletedOutcome").value = t.completedOutcome || "";
+  document.getElementById("fCompletedOutcome").value = displayText(t.completedOutcome);
   renderDrawerFileDetails(t);
   renderDrawerActivity(t);
   document.getElementById("drawerBackdrop").classList.add("open");
@@ -2982,9 +3158,8 @@ function closeDrawer() {
   document.getElementById("drawerBackdrop").classList.remove("open");
   document.getElementById("drawer").classList.remove("open");
   appState.editingIndex = -1;
-  setTimeout(() => {
-    if (!isEditingActive()) applyPendingSync().catch(err => showNotice("Sync refresh failed: " + err.message, "error"));
-  }, 0);
+  renderAppVersion();
+  setTimeout(() => resumeSyncAfterEditing(true), 0);
 }
 function readFormInto(card) {
   card.status = document.getElementById("fStatus").value;
@@ -3005,12 +3180,19 @@ async function postJson(url, body) {
   const headers = { "Content-Type": "application/json; charset=utf-8" };
   if (appState.editToken) headers["X-Kanban-Edit-Token"] = appState.editToken;
   if (appState.sync.projectsRevision) headers["X-Kanban-Projects-Revision"] = appState.sync.projectsRevision;
-  const r = await fetch(url, { method: "POST", headers: headers, body: JSON.stringify(body) });
-  let payload = {};
-  try { payload = await r.json(); } catch (_) {}
-  if (!r.ok || payload.ok === false) throw new Error(payload.error || ("HTTP " + r.status));
-  if (payload.syncStatus) rememberSyncStatus(payload.syncStatus);
-  return payload;
+  appState.saving = true;
+  renderAppVersion();
+  try {
+    const r = await fetch(url, { method: "POST", headers: headers, body: JSON.stringify(body) });
+    let payload = {};
+    try { payload = await r.json(); } catch (_) {}
+    if (!r.ok || payload.ok === false) throw new Error(payload.error || ("HTTP " + r.status));
+    if (payload.syncStatus) rememberSyncStatus(payload.syncStatus);
+    return payload;
+  } finally {
+    appState.saving = false;
+    renderAppVersion();
+  }
 }
 async function persistCard(action, note, mutate) {
   clearNotice();
@@ -3274,10 +3456,7 @@ function bindEvents() {
     }
   });
   document.body.addEventListener("focusout", function() {
-    if (!appState.sync.pending) return;
-    setTimeout(() => {
-      if (!isEditingActive()) applyPendingSync().catch(err => showNotice("Sync refresh failed: " + err.message, "error"));
-    }, 0);
+    setTimeout(resumeSyncAfterEditing, 0);
   });
   document.body.addEventListener("keydown", function(e) {
     const leadId = e.target.getAttribute("data-lead-input");
@@ -3435,12 +3614,17 @@ function bindEvents() {
 async function boot() {
   try {
     bindEvents();
-    startHeaderClock();
+    startSyncCountdown();
     loadProjectFileIndex();
     appState.cardActivityLoadPromise = loadCardActivityIndex();
     loadOverviewState();
     loadPresentationSelection();
     loadEditSession();
+    await checkAppVersion();
+    startAppVersionMonitoring();
+    appState.sync.syncInFlight = true;
+    appState.sync.lastSyncStartedAt = Date.now();
+    renderSyncIndicator();
     const initialSync = await fetchSyncStatus();
     const [dataResp, configResp, userResp] = await Promise.all([
       fetch('data/projects.json', { cache: 'no-store' }),
@@ -3450,6 +3634,7 @@ async function boot() {
     if (!dataResp.ok) throw new Error('HTTP ' + dataResp.status);
     appState.payload = await dataResp.json();
     rememberSyncStatus(initialSync);
+    appState.sync.syncInFlight = false;
     if (configResp && configResp.ok) appState.config = Object.assign({}, DEFAULT_CONFIG, await configResp.json());
     if (userResp && userResp.ok) {
       const user = await userResp.json();
@@ -3460,6 +3645,8 @@ async function boot() {
     startSyncPolling();
     markSplashReady();
   } catch (err) {
+    appState.sync.syncInFlight = false;
+    recordSyncCheck(null, err);
     setSplashError("Could not load project portfolio.");
     document.getElementById('board').innerHTML = '<div class="error">Could not load Kanban data. Error: ' + esc(err.message) + '</div>';
   }

@@ -1,0 +1,24 @@
+{
+  "name": "SAMI Project Portfolio",
+  "short_name": "SAMI Portfolio",
+  "description": "SAMI Project Portfolio Kanban",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#00768e",
+  "icons": [
+    {
+      "src": "assets/icons/sami_project_portfolio-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icons/sami_project_portfolio-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

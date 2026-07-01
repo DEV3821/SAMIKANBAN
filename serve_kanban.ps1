@@ -2,7 +2,11 @@ param(
   [string]$RootPath,
   [string]$Root,
   [string]$SourceRoot,
-  [string]$TeamRoot = $env:SAMI_KANBAN_TEAM_ROOT,
+  [string]$TeamRoot = "",
+  [string]$CanonicalRoot = "",
+  [string]$LocalMirrorRoot = "",
+  [ValidateSet('team-canonical','local-fallback','offline','error')]
+  [string]$RuntimeMode = "",
   [int]$Port = 8011,
   [string]$LogPath = "logs\kanban_server.log"
 )
@@ -33,6 +37,8 @@ function Initialize-LogPath {
 $script:LogPath = Initialize-LogPath $LogPath
 $script:BackedUpPaths = @{}
 $script:EditSessions = @{}
+$script:StartedAt = (Get-Date).ToString("o")
+$script:ServerScriptHash = try { (Get-FileHash -Algorithm SHA256 -LiteralPath $PSCommandPath).Hash.ToLowerInvariant() } catch { "unknown" }
 
 function Write-ServerLog {
   param([string]$Message)
@@ -62,6 +68,7 @@ function Get-MimeType {
     ".html" { "text/html; charset=utf-8"; break }
     ".htm"  { "text/html; charset=utf-8"; break }
     ".json" { "application/json; charset=utf-8"; break }
+    ".webmanifest" { "application/manifest+json; charset=utf-8"; break }
     ".js"   { "text/javascript; charset=utf-8"; break }
     ".css"  { "text/css; charset=utf-8"; break }
     ".jpg"  { "image/jpeg"; break }
@@ -70,6 +77,92 @@ function Get-MimeType {
     ".svg"  { "image/svg+xml"; break }
     ".ico"  { "image/x-icon"; break }
     default { "application/octet-stream" }
+  }
+}
+
+function Get-AppVersion {
+  param([string]$WebRoot)
+  try {
+    $versionPath = Join-Path $WebRoot "data\app_version.json"
+    if (-not (Test-Path -LiteralPath $versionPath -PathType Leaf)) { return "unknown" }
+    $payload = Get-Content -LiteralPath $versionPath -Raw | ConvertFrom-Json
+    if ([string]::IsNullOrWhiteSpace([string]$payload.version)) { return "unknown" }
+    return [string]$payload.version
+  } catch {
+    return "unknown"
+  }
+}
+
+function Get-AppVersionMetadata {
+  param([string]$AppRoot)
+  $versionPath = Join-Path $AppRoot "data\app_version.json"
+  $revision = Get-FileRevisionInfo -Path $versionPath
+  $result = @{ exists = [bool]$revision.exists; version = "unknown"; updatedAt = $revision.lastWriteUtc; path = $versionPath; error = "" }
+  if (-not $revision.exists) { return $result }
+  try {
+    $payload = Get-Content -LiteralPath $versionPath -Raw | ConvertFrom-Json
+    if (-not [string]::IsNullOrWhiteSpace([string]$payload.version)) { $result.version = ([string]$payload.version).Trim() }
+    if (-not [string]::IsNullOrWhiteSpace([string]$payload.releasedAt)) { $result.updatedAt = [string]$payload.releasedAt }
+  } catch {
+    $result.error = $_.Exception.Message
+  }
+  return $result
+}
+
+function Get-AppVersionStatus {
+  [void](Update-TeamReachability)
+  $runtime = Get-AppVersionMetadata -AppRoot $Root
+  $canonical = Get-AppVersionMetadata -AppRoot $script:CanonicalRoot
+  $appFiles = @('index.html', 'manifest.webmanifest', 'serve_kanban.ps1', 'tools\bootstrap_kanban.ps1')
+  $comparisons = @()
+  $filesDiffer = $false
+  $canonicalFileIsNewer = $false
+  foreach ($relativePath in $appFiles) {
+    $runtimeFile = Get-FileRevisionInfo -Path (Join-Path $Root $relativePath)
+    $canonicalFile = Get-FileRevisionInfo -Path (Join-Path $script:CanonicalRoot $relativePath)
+    $matches = $runtimeFile.exists -and $canonicalFile.exists -and $runtimeFile.hash -eq $canonicalFile.hash
+    if ($script:TeamReachable -and $canonicalFile.exists -and -not $matches) { $filesDiffer = $true }
+    if ($script:TeamReachable -and $canonicalFile.exists -and -not $matches -and $canonicalFile.lastWriteUtc -and
+        (-not $runtimeFile.lastWriteUtc -or [DateTime]$canonicalFile.lastWriteUtc -gt [DateTime]$runtimeFile.lastWriteUtc)) {
+      $canonicalFileIsNewer = $true
+    }
+    $comparisons += @{
+      path = $relativePath
+      runtimeExists = [bool]$runtimeFile.exists
+      canonicalExists = [bool]$canonicalFile.exists
+      matches = [bool]$matches
+      runtimeHash = $runtimeFile.hash
+      canonicalHash = $canonicalFile.hash
+    }
+  }
+  $runtimeVersionKnown = $runtime.version -ne 'unknown'
+  $canonicalVersionKnown = $canonical.version -ne 'unknown'
+  $versionsEqual = $runtimeVersionKnown -and $canonicalVersionKnown -and $runtime.version -eq $canonical.version
+  $canonicalVersionIsNewer = $canonicalVersionKnown -and (-not $runtimeVersionKnown -or
+    [string]::Compare($canonical.version, $runtime.version, [System.StringComparison]::OrdinalIgnoreCase) -gt 0)
+  $hashIndicatesUpdate = $filesDiffer -and ($versionsEqual -or (-not $runtimeVersionKnown -and -not $canonicalVersionKnown -and $canonicalFileIsNewer))
+  $updateAvailable = [bool]($script:TeamReachable -and ($canonicalVersionIsNewer -or $hashIndicatesUpdate))
+  $message = if (-not $script:TeamReachable) {
+    'Team ESMI is unavailable; app update status could not be checked'
+  } elseif ($updateAvailable) {
+    'Update available from Team ESMI'
+  } else {
+    'SAMI Project Portfolio is current'
+  }
+  return @{
+    ok = $true
+    mode = $script:EffectiveMode
+    teamReachable = [bool]$script:TeamReachable
+    runtimeVersion = $runtime.version
+    canonicalVersion = $canonical.version
+    runtimeUpdatedAt = $runtime.updatedAt
+    canonicalUpdatedAt = $canonical.updatedAt
+    updateAvailable = $updateAvailable
+    requiresRestart = $updateAvailable
+    message = $message
+    canonicalRoot = $script:CanonicalRoot
+    runtimeRoot = $Root
+    appFiles = $comparisons
   }
 }
 
@@ -508,29 +601,115 @@ function Sync-TeamDataToLocalCopies {
   return $runtimeResult
 }
 
-function Get-SyncStatus {
-  param(
-    [string]$SourceJsonPath,
-    [string]$LocalJsonPath,
-    [string]$SourceAuditPath,
-    [string]$LocalAuditPath,
-    [hashtable]$SyncResult = $null
-  )
+function Test-FileWritableWithoutChange {
+  param([string]$Path)
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+  try {
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+    $stream.Dispose()
+    return $true
+  } catch { return $false }
+}
 
-  if ($null -eq $SyncResult) {
-    $SyncResult = @{ projectsCopied = $false; auditCopied = $false }
+function Test-DirectoryWritableFromAcl {
+  param([string]$Path)
+  if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $false }
+  try {
+    $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+    $sids = New-Object 'System.Collections.Generic.HashSet[string]'
+    [void]$sids.Add($identity.User.Value)
+    foreach ($group in $identity.Groups) { [void]$sids.Add($group.Value) }
+    $acl = Get-Acl -LiteralPath $Path
+    $rules = $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
+    $writeMask = [System.Security.AccessControl.FileSystemRights]::Write -bor [System.Security.AccessControl.FileSystemRights]::Modify -bor [System.Security.AccessControl.FileSystemRights]::FullControl -bor [System.Security.AccessControl.FileSystemRights]::CreateFiles -bor [System.Security.AccessControl.FileSystemRights]::CreateDirectories
+    $allowed = $false
+    foreach ($rule in $rules) {
+      if (-not $sids.Contains($rule.IdentityReference.Value) -or -not ($rule.FileSystemRights -band $writeMask)) { continue }
+      if ($rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Deny) { return $false }
+      if ($rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow) { $allowed = $true }
+    }
+    return $allowed
+  } catch { return $false }
+}
+
+function Get-CanonicalFileStatus {
+  param([string]$Path)
+  $revision = Get-FileRevisionInfo -Path $Path
+  return @{
+    path = $Path
+    readable = [bool]$revision.exists
+    writable = Test-FileWritableWithoutChange -Path $Path
+    timestamp = $revision.lastWriteUtc
+    lastWriteUtc = $revision.lastWriteUtc
+    hash = $revision.hash
+    length = $revision.length
   }
+}
 
+function Update-TeamReachability {
+  if ($script:LastTeamCheck -and ((Get-Date) - $script:LastTeamCheck).TotalSeconds -lt 15) { return $script:TeamReachable }
+  $script:TeamReachable = (Test-ReachableDirectory -Path $script:CanonicalRoot) -and
+    (Test-Path -LiteralPath $script:CanonicalProjectsPath -PathType Leaf) -and
+    (Test-Path -LiteralPath $script:CanonicalAuditPath -PathType Leaf) -and
+    (Test-Path -LiteralPath $script:CanonicalProjectFilesRoot -PathType Container)
+  if ($script:TeamReachable) { $script:EffectiveMode = 'team-canonical' }
+  elseif ($script:ConfiguredMode -eq 'local-fallback') { $script:EffectiveMode = 'local-fallback' }
+  else { $script:EffectiveMode = 'offline' }
+  $script:LastTeamCheck = Get-Date
+  return $script:TeamReachable
+}
+
+function Copy-CanonicalFileToRuntime {
+  param([string]$CanonicalPath, [string]$RuntimePath, [string]$Label)
+  if (-not (Test-Path -LiteralPath $CanonicalPath -PathType Leaf)) { throw "Canonical $Label is missing: $CanonicalPath" }
+  $parent = Split-Path -Parent $RuntimePath
+  if (-not (Test-Path -LiteralPath $parent -PathType Container)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+  $copyNeeded = -not (Test-Path -LiteralPath $RuntimePath -PathType Leaf)
+  if (-not $copyNeeded) { $copyNeeded = (Get-FileRevisionInfo $CanonicalPath).hash -ne (Get-FileRevisionInfo $RuntimePath).hash }
+  if ($copyNeeded) {
+    Backup-Once -Path $RuntimePath
+    [System.IO.File]::Copy($CanonicalPath, $RuntimePath, $true)
+    Write-ServerLog "Canonical-to-runtime sync copied ${Label}: $CanonicalPath -> $RuntimePath"
+    return $true
+  }
+  return $false
+}
+
+function Sync-CanonicalToRuntime {
+  $result = @{ projectsCopied=$false; auditCopied=$false; skipped='' }
+  if (-not (Update-TeamReachability)) { $result.skipped = 'team_unreachable'; return $result }
+  $result.projectsCopied = Copy-CanonicalFileToRuntime -CanonicalPath $script:CanonicalProjectsPath -RuntimePath $script:RuntimeProjectsPath -Label 'projects.json'
+  $result.auditCopied = Copy-CanonicalFileToRuntime -CanonicalPath $script:CanonicalAuditPath -RuntimePath $script:RuntimeAuditPath -Label 'card_updates.jsonl'
+  return $result
+}
+
+function Get-SyncStatus {
+  param([hashtable]$SyncResult = $null)
+  if ($null -eq $SyncResult) { $SyncResult = @{ projectsCopied=$false; auditCopied=$false; skipped='' } }
+  [void](Update-TeamReachability)
+  $projects = Get-CanonicalFileStatus -Path $script:CanonicalProjectsPath
+  $audit = Get-CanonicalFileStatus -Path $script:CanonicalAuditPath
+  $runtimeProjects = Get-FileRevisionInfo -Path $script:RuntimeProjectsPath
+  $runtimeAudit = Get-FileRevisionInfo -Path $script:RuntimeAuditPath
+  $projectFilesExists = Test-Path -LiteralPath $script:CanonicalProjectFilesRoot -PathType Container
   return @{
     ok = $true
-    source = @{
-      projects = Get-FileRevisionInfo -Path $SourceJsonPath
-      audit = Get-FileRevisionInfo -Path $SourceAuditPath
+    mode = $script:EffectiveMode
+    canonicalRoot = $script:CanonicalRoot
+    runtimeRoot = $Root
+    localMirrorRoot = $script:LocalMirrorRoot
+    teamReachable = [bool]$script:TeamReachable
+    projectsJson = $projects
+    cardUpdatesJsonl = $audit
+    projectFiles = @{
+      path = $script:CanonicalProjectFilesRoot
+      exists = [bool]$projectFilesExists
+      readable = [bool]$projectFilesExists
+      writable = Test-DirectoryWritableFromAcl -Path $script:CanonicalProjectFilesRoot
     }
-    local = @{
-      projects = Get-FileRevisionInfo -Path $LocalJsonPath
-      audit = Get-FileRevisionInfo -Path $LocalAuditPath
-    }
+    lastChecked = (Get-Date).ToString('o')
+    source = @{ projects=@{ exists=$projects.readable; path=$projects.path; lastWriteUtc=$projects.lastWriteUtc; hash=$projects.hash; length=$projects.length }; audit=@{ exists=$audit.readable; path=$audit.path; lastWriteUtc=$audit.lastWriteUtc; hash=$audit.hash; length=$audit.length } }
+    local = @{ projects=$runtimeProjects; audit=$runtimeAudit }
     synced = $SyncResult
   }
 }
@@ -755,16 +934,42 @@ function Test-ReachableDirectory {
 function Get-ProjectFolderLocation {
   param([string]$RelativePath)
   $relativeWindows = $RelativePath.Replace("/", [System.IO.Path]::DirectorySeparatorChar)
-  $teamAvailable = Test-ReachableDirectory -Path $TeamRoot
-  $canonicalPath = Join-Path $TeamRoot $relativeWindows
-  $localPath = Join-Path $SourceRoot $relativeWindows
+  $teamAvailable = Update-TeamReachability
+  $canonicalPath = [System.IO.Path]::GetFullPath((Join-Path $script:CanonicalRoot $relativeWindows))
+  $localPath = [System.IO.Path]::GetFullPath((Join-Path $script:LocalMirrorRoot $relativeWindows))
   $warnings = @()
-  $selectedPath = if ($teamAvailable) { $canonicalPath } else { "" }
-  $usingLocalFallback = $false
+  $usingLocalFallback = -not $teamAvailable -and $script:EffectiveMode -eq 'local-fallback'
+  $selectedPath = if ($teamAvailable) { $canonicalPath } elseif ($usingLocalFallback) { $localPath } else { "" }
   if (-not $teamAvailable) {
-    $warnings += "Team ESMI source is unavailable. The shared canonical project folder cannot be reached."
+    $warnings += "Team ESMI is not confirmed. Any local folder is local-only fallback and is not synced."
   }
   return @{ teamAvailable = $teamAvailable; canonicalPath = $canonicalPath; localPath = $localPath; selectedPath = $selectedPath; usingLocalFallback = $usingLocalFallback; warnings = $warnings }
+}
+
+function Get-ProjectCardById {
+  param([string]$ProjectId)
+  $safeId = Assert-ProjectId -ProjectId $ProjectId
+  $projectsPath = if ($script:TeamReachable) { $script:CanonicalProjectsPath } else { $script:RuntimeProjectsPath }
+  if (-not (Test-Path -LiteralPath $projectsPath -PathType Leaf)) { throw "Projects data is unavailable: $projectsPath" }
+  $payload = Get-Content -LiteralPath $projectsPath -Raw | ConvertFrom-Json
+  $card = @($payload.projects | Where-Object { [string]$_.id -eq $safeId }) | Select-Object -First 1
+  if ($null -eq $card) { throw "Project card was not found: $safeId" }
+  return $card
+}
+
+function Get-ProjectCardByFolderPath {
+  param([string]$RelativePath)
+  $projectsPath = if ($script:TeamReachable) { $script:CanonicalProjectsPath } else { $script:RuntimeProjectsPath }
+  if (-not (Test-Path -LiteralPath $projectsPath -PathType Leaf)) { throw "Projects data is unavailable: $projectsPath" }
+  $payload = Get-Content -LiteralPath $projectsPath -Raw | ConvertFrom-Json
+  $card = @($payload.projects | Where-Object { $_.folder -and ([string]$_.folder.relativePath).Equals($RelativePath, [System.StringComparison]::OrdinalIgnoreCase) }) | Select-Object -First 1
+  if ($null -eq $card) { throw "Project card was not found for folder: $RelativePath" }
+  return $card
+}
+
+function Write-FolderOperationLog {
+  param([string]$Operation, [string]$ProjectId, [string]$CardTitle, [string]$RelativePath, [string]$ResolvedPath, [string]$Status)
+  Write-ServerLog "$Operation cardId='$ProjectId' cardTitle='$CardTitle' relativePath='$RelativePath' canonicalProjectFilesRoot='$($script:CanonicalProjectFilesRoot)' localProjectFilesRoot='$($script:LocalProjectFilesRoot)' resolvedPath='$ResolvedPath' teamReachable=$($script:TeamReachable) status='$Status'"
 }
 
 function Ensure-ProjectFolder {
@@ -775,10 +980,13 @@ function Ensure-ProjectFolder {
   if ([string]::IsNullOrWhiteSpace($projectName) -or $projectName.Length -gt 200) { throw "projectName is required and must be 200 characters or fewer." }
   $relativePath = Resolve-ProjectRelativePath -ProjectId $projectId
   $location = Get-ProjectFolderLocation -RelativePath $relativePath
-  if ([string]::IsNullOrWhiteSpace($location.selectedPath)) { throw "Team ESMI source is unavailable. The shared canonical project folder cannot be reached; no local project folder was created." }
+  if ([string]::IsNullOrWhiteSpace($location.selectedPath)) {
+    Write-FolderOperationLog -Operation 'folder ensure blocked' -ProjectId $projectId -CardTitle $projectName -RelativePath $relativePath -ResolvedPath '' -Status 'orange'
+    throw "Team ESMI is unreachable and explicit local fallback is not active; no project folder was created."
+  }
   $folderRoot = [System.IO.Path]::GetFullPath($location.selectedPath)
-  $approvedSourceRoot = $TeamRoot
-  $approvedRoot = [System.IO.Path]::GetFullPath((Join-Path $approvedSourceRoot "project_files"))
+  $approvedRoot = if ($location.teamAvailable) { $script:CanonicalProjectFilesRoot } else { $script:LocalProjectFilesRoot }
+  $approvedRoot = [System.IO.Path]::GetFullPath($approvedRoot)
   $approvedPrefix = $approvedRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
   if (-not $folderRoot.StartsWith($approvedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { throw "Resolved project folder is outside the approved project_files root." }
   $created = -not (Test-Path -LiteralPath $folderRoot -PathType Container)
@@ -800,28 +1008,46 @@ This folder is linked from the SAMI Kanban. Store project documents and administ
 "@
     [System.IO.File]::WriteAllText($readmePath, $readme.TrimStart() + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
   }
-  return @{ ok = $true; created = $created; relativePath = $relativePath; canonicalPath = $location.canonicalPath; localPath = $location.localPath; warnings = $location.warnings }
+  $colour = if ($location.teamAvailable) { 'green' } else { 'orange' }
+  $source = if ($location.teamAvailable) { 'team-esmi' } else { 'local-fallback' }
+  Write-FolderOperationLog -Operation 'folder ensure' -ProjectId $projectId -CardTitle $projectName -RelativePath $relativePath -ResolvedPath $folderRoot -Status $colour
+  return @{ ok = $true; created = $created; relativePath = $relativePath; canonicalPath = $location.canonicalPath; localPath = $location.localPath; resolvedPath = $folderRoot; source = $source; statusColor = $colour; teamReachable = [bool]$location.teamAvailable; warnings = $location.warnings }
 }
 
 function Get-ProjectFolderStatus {
   param([string]$ProjectId, [string]$RelativePath)
-  $safeRelativePath = Resolve-ProjectRelativePath -ProjectId $ProjectId -RelativePath $RelativePath
+  [void](Update-TeamReachability)
+  $safeRelativePath = Resolve-ProjectRelativePath -ProjectId '' -RelativePath $RelativePath
+  $card = if ([string]::IsNullOrWhiteSpace($ProjectId)) { Get-ProjectCardByFolderPath -RelativePath $safeRelativePath } else { Get-ProjectCardById -ProjectId $ProjectId }
+  $ProjectId = [string]$card.id
+  if ($card.folder -and [string]$card.folder.relativePath -and -not ([string]$card.folder.relativePath).Equals($safeRelativePath, [System.StringComparison]::OrdinalIgnoreCase)) { throw "Requested folder path does not match the project card metadata." }
   $location = Get-ProjectFolderLocation -RelativePath $safeRelativePath
   $existsCanonical = $location.teamAvailable -and (Test-Path -LiteralPath $location.canonicalPath -PathType Container)
-  $existsLocal = -not $SourceRoot.Equals($TeamRoot, [System.StringComparison]::OrdinalIgnoreCase) -and (Test-ReachableDirectory -Path $SourceRoot) -and (Test-Path -LiteralPath $location.localPath -PathType Container)
-  return @{ ok = $true; linked = $true; existsCanonical = [bool]$existsCanonical; existsLocal = [bool]$existsLocal; relativePath = $safeRelativePath; canonicalPath = $location.canonicalPath; warnings = $location.warnings }
+  $existsLocal = Test-Path -LiteralPath $location.localPath -PathType Container
+  $colour = if ($existsCanonical) { 'green' } else { 'orange' }
+  $message = if ($existsCanonical) { 'Files folder is on Team ESMI' } else { 'Files folder is local-only or Team ESMI could not be confirmed' }
+  Write-FolderOperationLog -Operation 'folder status' -ProjectId $ProjectId -CardTitle ([string]$card.title) -RelativePath $safeRelativePath -ResolvedPath $(if ($existsCanonical) { $location.canonicalPath } else { $location.localPath }) -Status $colour
+  return @{ ok = $true; linked = $true; statusColor = $colour; message = $message; source = $(if ($existsCanonical) { 'team-esmi' } else { $script:EffectiveMode }); teamReachable = [bool]$location.teamAvailable; existsCanonical = [bool]$existsCanonical; existsLocal = [bool]$existsLocal; relativePath = $safeRelativePath; canonicalPath = $location.canonicalPath; localPath = $location.localPath; warnings = $location.warnings }
 }
 
 function Open-ProjectFolder {
   param([string]$Body)
   $payload = $Body | ConvertFrom-Json
-  $relativePath = Resolve-ProjectRelativePath -ProjectId ([string]$payload.projectId) -RelativePath ([string]$payload.relativePath)
+  [void](Update-TeamReachability)
+  $relativePath = Resolve-ProjectRelativePath -ProjectId '' -RelativePath ([string]$payload.relativePath)
+  $card = if ([string]::IsNullOrWhiteSpace([string]$payload.projectId)) { Get-ProjectCardByFolderPath -RelativePath $relativePath } else { Get-ProjectCardById -ProjectId ([string]$payload.projectId) }
+  $projectId = Assert-ProjectId -ProjectId ([string]$card.id)
+  if ($card.folder -and [string]$card.folder.relativePath -and -not ([string]$card.folder.relativePath).Equals($relativePath, [System.StringComparison]::OrdinalIgnoreCase)) { throw "Requested folder path does not match the project card metadata." }
   $location = Get-ProjectFolderLocation -RelativePath $relativePath
-  if (-not $location.teamAvailable) { throw "Team ESMI source is unavailable. The shared canonical project folder cannot be reached; no local project folder was opened." }
+  if (-not $location.teamAvailable) {
+    Write-FolderOperationLog -Operation 'folder open blocked' -ProjectId $projectId -CardTitle ([string]$card.title) -RelativePath $relativePath -ResolvedPath $location.localPath -Status 'orange'
+    return @{ ok=$true; opened=$false; statusColor='orange'; source=$script:EffectiveMode; teamReachable=$false; relativePath=$relativePath; canonicalPath=$location.canonicalPath; localPath=$location.localPath; warnings=$location.warnings }
+  }
   $target = if (Test-Path -LiteralPath $location.canonicalPath -PathType Container) { $location.canonicalPath } else { throw "The Team ESMI project folder does not exist: $($location.canonicalPath)" }
   $quotedTarget = '"' + $target + '"'
   Start-Process -FilePath "explorer.exe" -ArgumentList $quotedTarget
-  return @{ ok = $true; opened = $true; relativePath = $relativePath; canonicalPath = $location.canonicalPath; localPath = $location.localPath; warnings = $location.warnings }
+  Write-FolderOperationLog -Operation 'folder open' -ProjectId $projectId -CardTitle ([string]$card.title) -RelativePath $relativePath -ResolvedPath $target -Status 'green'
+  return @{ ok = $true; opened = $true; openedPath = $target; source = 'team-esmi'; statusColor = 'green'; teamReachable=$true; relativePath = $relativePath; canonicalPath = $location.canonicalPath; localPath = $location.localPath; warnings = $location.warnings }
 }
 
 function Send-Response {
@@ -876,6 +1102,9 @@ try {
   Write-ServerLog "Root parameter: $Root"
   Write-ServerLog "SourceRoot parameter: $SourceRoot"
   Write-ServerLog "TeamRoot parameter: $TeamRoot"
+  Write-ServerLog "CanonicalRoot parameter: $CanonicalRoot"
+  Write-ServerLog "LocalMirrorRoot parameter: $LocalMirrorRoot"
+  Write-ServerLog "RuntimeMode parameter: $RuntimeMode"
   Write-ServerLog "Port: $Port"
   Write-ServerLog "Requested log path: $LogPath"
   Write-ServerLog "Resolved log path: $script:LogPath"
@@ -897,41 +1126,67 @@ try {
   Write-ServerLog "Resolved root path: $Root"
 
   if ([string]::IsNullOrWhiteSpace($SourceRoot)) {
-    $SourceRoot = $Root
+    $SourceRoot = $PSScriptRoot
   }
   $SourceRoot = [System.IO.Path]::GetFullPath($SourceRoot).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
-  Write-ServerLog "Resolved source root: $SourceRoot"
+  Write-ServerLog "Resolved script/app root: $SourceRoot"
 
-  if ([string]::IsNullOrWhiteSpace($TeamRoot)) {
-    $TeamRoot = $SourceRoot
-  }
-  $TeamRoot = [System.IO.Path]::GetFullPath($TeamRoot).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
-  Write-ServerLog "Resolved Team ESMI root: $TeamRoot"
+  if ([string]::IsNullOrWhiteSpace($CanonicalRoot)) { $CanonicalRoot = $env:SAMI_KANBAN_CANONICAL_ROOT }
+  if ([string]::IsNullOrWhiteSpace($CanonicalRoot)) { $CanonicalRoot = $TeamRoot }
+  if ([string]::IsNullOrWhiteSpace($CanonicalRoot)) { $CanonicalRoot = $env:SAMI_KANBAN_TEAM_ROOT }
+  if ([string]::IsNullOrWhiteSpace($CanonicalRoot)) { $CanonicalRoot = '\\fusafmcf01\Medical Imaging\Team_ESMI\Program Delivery\SAMI-Kanban-WorkServer' }
+  $CanonicalRoot = [System.IO.Path]::GetFullPath($CanonicalRoot).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+  $TeamRoot = $CanonicalRoot
+  if ([string]::IsNullOrWhiteSpace($LocalMirrorRoot)) { $LocalMirrorRoot = $Root }
+  $LocalMirrorRoot = [System.IO.Path]::GetFullPath($LocalMirrorRoot).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+  if ([string]::IsNullOrWhiteSpace($RuntimeMode)) { $RuntimeMode = $env:SAMI_KANBAN_RUNTIME_MODE }
+  if ([string]::IsNullOrWhiteSpace($RuntimeMode)) { $RuntimeMode = 'offline' }
+
+  $script:CanonicalRoot = $CanonicalRoot
+  $script:LocalMirrorRoot = $LocalMirrorRoot
+  $script:ConfiguredMode = $RuntimeMode
+  $script:EffectiveMode = $RuntimeMode
+  $script:TeamReachable = $RuntimeMode -eq 'team-canonical'
+  $script:LastTeamCheck = Get-Date
+  $script:CanonicalProjectsPath = Join-Path $CanonicalRoot 'data\projects.json'
+  $script:CanonicalAuditPath = Join-Path $CanonicalRoot 'data\card_updates.jsonl'
+  $script:CanonicalConfigPath = Join-Path $CanonicalRoot 'data\kanban_config.json'
+  $script:CanonicalProjectFilesRoot = Join-Path $CanonicalRoot 'project_files'
+  $script:RuntimeProjectsPath = Join-Path $Root 'data\projects.json'
+  $script:RuntimeAuditPath = Join-Path $Root 'data\card_updates.jsonl'
+  $script:RuntimeConfigPath = Join-Path $Root 'data\kanban_config.json'
+  $script:LocalProjectFilesRoot = Join-Path $LocalMirrorRoot 'project_files'
+  [void](Update-TeamReachability)
+  Write-ServerLog "Canonical Team ESMI root: $CanonicalRoot"
+  Write-ServerLog "Runtime root: $Root"
+  Write-ServerLog "Local mirror root: $LocalMirrorRoot"
+  Write-ServerLog "Team ESMI reachable: $($script:TeamReachable)"
+  Write-ServerLog "Selected mode: $($script:EffectiveMode)"
 
   if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
     throw "RootPath does not exist or is not a folder: $Root"
   }
 
   $indexPath = Join-Path $Root "index.html"
-  $jsonPath = Join-Path $Root "data\projects.json"
-  $auditPath = Join-Path $Root "data\card_updates.jsonl"
-  $configPath = Join-Path $Root "data\kanban_config.json"
-  $sourceJsonPath = Join-Path $SourceRoot "data\projects.json"
-  $sourceAuditPath = Join-Path $SourceRoot "data\card_updates.jsonl"
-  $sourceConfigPath = Join-Path $SourceRoot "data\kanban_config.json"
-  $teamJsonPath = Join-Path $TeamRoot "data\projects.json"
-  $teamAuditPath = Join-Path $TeamRoot "data\card_updates.jsonl"
-  $teamConfigPath = Join-Path $TeamRoot "data\kanban_config.json"
-  $authorityConfigPath = if (Test-Path -LiteralPath $teamConfigPath -PathType Leaf) { $teamConfigPath } else { $sourceConfigPath }
+  $jsonPath = $script:RuntimeProjectsPath
+  $auditPath = $script:RuntimeAuditPath
+  $configPath = $script:RuntimeConfigPath
+  $teamJsonPath = $script:CanonicalProjectsPath
+  $teamAuditPath = $script:CanonicalAuditPath
+  $teamConfigPath = $script:CanonicalConfigPath
+  $authorityJsonPath = if ($script:TeamReachable) { $teamJsonPath } else { $jsonPath }
+  $authorityAuditPath = if ($script:TeamReachable) { $teamAuditPath } else { $auditPath }
+  $authorityConfigPath = if ($script:TeamReachable -and (Test-Path -LiteralPath $teamConfigPath -PathType Leaf)) { $teamConfigPath } else { $configPath }
+  if ($script:TeamReachable) { [void](Sync-CanonicalToRuntime) }
   Assert-ReadableFile -Path $indexPath -Label "index.html"
   Assert-ReadableFile -Path $jsonPath -Label "data\projects.json"
-  Assert-ReadableFile -Path $sourceJsonPath -Label "source data\projects.json"
-  Assert-ReadableFile -Path $teamJsonPath -Label "Team ESMI data\projects.json"
+  if ($script:TeamReachable) { Assert-ReadableFile -Path $teamJsonPath -Label "Team ESMI data\projects.json" }
   Write-ServerLog "Root access check passed."
   Write-ServerLog "index.html readable: $indexPath"
-  Write-ServerLog "data/projects.json readable: $jsonPath"
-  Write-ServerLog "source data/projects.json readable: $sourceJsonPath"
-  Write-ServerLog "Team ESMI data/projects.json readable: $teamJsonPath"
+  Write-ServerLog "runtime data/projects.json readable: $jsonPath"
+  Write-ServerLog "canonical data/projects.json readable=$([bool](Test-Path -LiteralPath $teamJsonPath -PathType Leaf)) writable=$(Test-FileWritableWithoutChange $teamJsonPath): $teamJsonPath"
+  Write-ServerLog "canonical data/card_updates.jsonl readable=$([bool](Test-Path -LiteralPath $teamAuditPath -PathType Leaf)) writable=$(Test-FileWritableWithoutChange $teamAuditPath): $teamAuditPath"
+  Write-ServerLog "canonical project_files readable=$([bool](Test-Path -LiteralPath $script:CanonicalProjectFilesRoot -PathType Container)) writable=$(Test-DirectoryWritableFromAcl $script:CanonicalProjectFilesRoot): $($script:CanonicalProjectFilesRoot)"
 
   $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Parse("127.0.0.1"), $Port)
   Write-ServerLog "Attempting to bind TcpListener to 127.0.0.1:$Port"
@@ -960,24 +1215,36 @@ try {
         $requestBody = Read-RequestBody -Stream $stream -Request $request -InitialBuffer $buffer -InitialRead $read
         try {
           if ($pathOnly -eq "/api/projects") {
+            [void](Update-TeamReachability)
+            if (-not $script:TeamReachable -and $script:EffectiveMode -ne 'local-fallback') { throw "Team ESMI is unreachable and local fallback writes are not enabled." }
+            $authorityConfigPath = if ($script:TeamReachable -and (Test-Path -LiteralPath $teamConfigPath -PathType Leaf)) { $teamConfigPath } else { $configPath }
             Require-EditToken -Request $request -ConfigPath $authorityConfigPath
-            Require-FreshProjectsSource -Request $request -SourceJsonPath $teamJsonPath
-            Save-ProjectsJson -Body $requestBody -JsonPaths @($teamJsonPath, $sourceJsonPath, $jsonPath)
-            $syncStatus = Get-SyncStatus -SourceJsonPath $teamJsonPath -LocalJsonPath $jsonPath -SourceAuditPath $teamAuditPath -LocalAuditPath $auditPath
+            $authorityJsonPath = if ($script:TeamReachable) { $teamJsonPath } else { $jsonPath }
+            Require-FreshProjectsSource -Request $request -SourceJsonPath $authorityJsonPath
+            $savePaths = if ($script:TeamReachable) { @($teamJsonPath, $jsonPath) } else { @($jsonPath) }
+            Save-ProjectsJson -Body $requestBody -JsonPaths $savePaths
+            $syncStatus = Get-SyncStatus
             Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload @{ ok = $true; syncStatus = $syncStatus }
-            Write-ServerLog "200 POST $rawPath -> $teamJsonPath, $sourceJsonPath and $jsonPath"
+            Write-ServerLog "200 POST $rawPath mode=$($script:EffectiveMode) -> $($savePaths -join ', ')"
             continue
           }
           if ($pathOnly -eq "/api/card-updates") {
+            [void](Update-TeamReachability)
+            if (-not $script:TeamReachable -and $script:EffectiveMode -ne 'local-fallback') { throw "Team ESMI is unreachable and local fallback writes are not enabled." }
+            $authorityConfigPath = if ($script:TeamReachable -and (Test-Path -LiteralPath $teamConfigPath -PathType Leaf)) { $teamConfigPath } else { $configPath }
             Require-EditToken -Request $request -ConfigPath $authorityConfigPath
-            Require-FreshProjectsSource -Request $request -SourceJsonPath $teamJsonPath
-            Append-AuditEvent -Body $requestBody -AuditPaths @($teamAuditPath, $sourceAuditPath, $auditPath)
-            $syncStatus = Get-SyncStatus -SourceJsonPath $teamJsonPath -LocalJsonPath $jsonPath -SourceAuditPath $teamAuditPath -LocalAuditPath $auditPath
+            $authorityJsonPath = if ($script:TeamReachable) { $teamJsonPath } else { $jsonPath }
+            Require-FreshProjectsSource -Request $request -SourceJsonPath $authorityJsonPath
+            $auditPaths = if ($script:TeamReachable) { @($teamAuditPath, $auditPath) } else { @($auditPath) }
+            Append-AuditEvent -Body $requestBody -AuditPaths $auditPaths
+            $syncStatus = Get-SyncStatus
             Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload @{ ok = $true; syncStatus = $syncStatus }
-            Write-ServerLog "200 POST $rawPath -> $teamAuditPath, $sourceAuditPath and $auditPath"
+            Write-ServerLog "200 POST $rawPath mode=$($script:EffectiveMode) -> $($auditPaths -join ', ')"
             continue
           }
           if ($pathOnly -eq "/api/project-folder/ensure") {
+            [void](Update-TeamReachability)
+            $authorityConfigPath = if ($script:TeamReachable -and (Test-Path -LiteralPath $teamConfigPath -PathType Leaf)) { $teamConfigPath } else { $configPath }
             Require-EditToken -Request $request -ConfigPath $authorityConfigPath
             $folderPayload = Ensure-ProjectFolder -Body $requestBody
             Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload $folderPayload
@@ -991,6 +1258,8 @@ try {
             continue
           }
           if ($pathOnly -eq "/api/unlock") {
+            [void](Update-TeamReachability)
+            $authorityConfigPath = if ($script:TeamReachable -and (Test-Path -LiteralPath $teamConfigPath -PathType Leaf)) { $teamConfigPath } else { $configPath }
             $unlockPayload = Unlock-Editing -Body $requestBody -ConfigPath $authorityConfigPath
             Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload $unlockPayload
             Write-ServerLog "200 POST $rawPath"
@@ -1002,7 +1271,7 @@ try {
           continue
         } catch {
           Write-ExceptionLog -Exception $_.Exception -Prefix "SAVE ERROR"
-          $status = if ($_.Exception.Message -match "locked|PIN") { 401 } elseif ($_.Exception.Message -match "source changed|Refresh the board") { 409 } elseif ($_.Exception.Message -match "does not exist") { 404 } elseif ($_.Exception.Message -match "unavailable; no approved") { 503 } elseif ($_.Exception.Message -match "Invalid|must be|required|outside the approved") { 400 } else { 500 }
+          $status = if ($_.Exception.Message -match "locked|PIN") { 401 } elseif ($_.Exception.Message -match "source changed|Refresh the board") { 409 } elseif ($_.Exception.Message -match "does not exist|was not found") { 404 } elseif ($_.Exception.Message -match "unreachable|unavailable") { 503 } elseif ($_.Exception.Message -match "Invalid|must be|required|outside the approved|does not match") { 400 } else { 500 }
           $statusText = if ($status -eq 400) { "Bad Request" } elseif ($status -eq 401) { "Unauthorized" } elseif ($status -eq 404) { "Not Found" } elseif ($status -eq 409) { "Conflict" } elseif ($status -eq 503) { "Service Unavailable" } else { "Save Failed" }
           Send-Json -Stream $stream -StatusCode $status -StatusText $statusText -Payload @{ ok = $false; error = $_.Exception.Message }
           continue
@@ -1017,6 +1286,26 @@ try {
       }
 
       $pathOnly = ($rawPath -split "\?")[0]
+      if ($pathOnly -eq "/api/health") {
+        [void](Update-TeamReachability)
+        Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload @{
+          ok = $true
+          app = "SAMI Project Portfolio"
+          port = $Port
+          pid = $PID
+          root = $Root
+          startedAt = $script:StartedAt
+          appVersion = Get-AppVersion -WebRoot $Root
+          serverScriptHash = $script:ServerScriptHash
+          mode = $script:EffectiveMode
+          canonicalRoot = $script:CanonicalRoot
+          runtimeRoot = $Root
+          localMirrorRoot = $script:LocalMirrorRoot
+          teamReachable = [bool]$script:TeamReachable
+        }
+        Write-ServerLog "200 $method $rawPath"
+        continue
+      }
       if ($pathOnly -eq "/api/project-folder/status") {
         try {
           $query = Get-QueryValues -RawPath $rawPath
@@ -1025,14 +1314,20 @@ try {
           Write-ServerLog "200 $method $rawPath"
         } catch {
           Write-ExceptionLog -Exception $_.Exception -Prefix "FOLDER STATUS ERROR"
-          Send-Json -Stream $stream -StatusCode 400 -StatusText "Bad Request" -Payload @{ ok = $false; error = $_.Exception.Message }
+          Send-Json -Stream $stream -StatusCode 400 -StatusText "Bad Request" -Payload @{ ok = $false; statusColor = 'red'; message = 'Folder check failed'; error = $_.Exception.Message }
         }
         continue
       }
       if ($pathOnly -eq "/api/sync-status") {
-        $syncResult = Sync-TeamDataToLocalCopies -TeamJsonPath $teamJsonPath -RuntimeJsonPath $jsonPath -SourceJsonPath $sourceJsonPath -TeamAuditPath $teamAuditPath -RuntimeAuditPath $auditPath -SourceAuditPath $sourceAuditPath
-        $syncStatus = Get-SyncStatus -SourceJsonPath $teamJsonPath -LocalJsonPath $jsonPath -SourceAuditPath $teamAuditPath -LocalAuditPath $auditPath -SyncResult $syncResult
+        $syncResult = Sync-CanonicalToRuntime
+        $syncStatus = Get-SyncStatus -SyncResult $syncResult
         Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload $syncStatus
+        Write-ServerLog "200 $method $rawPath"
+        continue
+      }
+      if ($pathOnly -eq "/api/app-version/status") {
+        $appVersionStatus = Get-AppVersionStatus
+        Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload $appVersionStatus
         Write-ServerLog "200 $method $rawPath"
         continue
       }
@@ -1061,7 +1356,7 @@ try {
 
       if (Test-Path -LiteralPath $candidate -PathType Leaf) {
         if ($pathOnly -eq "/data/projects.json" -or $pathOnly -eq "/data/card_updates.jsonl") {
-          [void](Sync-TeamDataToLocalCopies -TeamJsonPath $teamJsonPath -RuntimeJsonPath $jsonPath -SourceJsonPath $sourceJsonPath -TeamAuditPath $teamAuditPath -RuntimeAuditPath $auditPath -SourceAuditPath $sourceAuditPath)
+          [void](Sync-CanonicalToRuntime)
         }
         $body = [System.IO.File]::ReadAllBytes($candidate)
         Send-Response -Stream $stream -StatusCode 200 -StatusText "OK" -Body $body -ContentType (Get-MimeType $candidate) -HeadOnly $headOnly
