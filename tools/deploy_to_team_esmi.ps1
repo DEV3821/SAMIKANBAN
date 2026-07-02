@@ -25,6 +25,10 @@ $versionPayload = [ordered]@{
 $sourceVersion = Join-Path $SourcePath 'data\app_version.json'
 New-Item -ItemType Directory -Path (Split-Path -Parent $sourceVersion) -Force | Out-Null
 [System.IO.File]::WriteAllText($sourceVersion, (($versionPayload | ConvertTo-Json) + [Environment]::NewLine), [System.Text.UTF8Encoding]::new($false))
+$installerPayloadVersion = Join-Path $SourcePath 'dist\SAMI_Project_Portfolio_User_Installer\payload\data\app_version.json'
+if (Test-Path -LiteralPath $installerPayloadVersion -PathType Leaf) {
+  Copy-Item -LiteralPath $sourceVersion -Destination $installerPayloadVersion -Force
+}
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $backupRoot = Join-Path $TeamRoot "backups\app-deploy-$stamp"
@@ -54,6 +58,22 @@ if (Test-Path -LiteralPath $assetRoot -PathType Container) {
   Get-ChildItem -LiteralPath $assetRoot -File -Recurse | ForEach-Object {
     $relative = $_.FullName.Substring($SourcePath.Length).TrimStart('\')
     Deploy-File $relative
+  }
+}
+
+$installerSource = Join-Path $SourcePath 'dist\SAMI_Project_Portfolio_User_Installer'
+if (Test-Path -LiteralPath $installerSource -PathType Container) {
+  $installerDestination = Join-Path $TeamRoot 'installers\SAMI_Project_Portfolio_User_Installer'
+  $installerBackup = Join-Path $backupRoot 'installers\SAMI_Project_Portfolio_User_Installer'
+  if (Test-Path -LiteralPath $installerDestination -PathType Container) {
+    New-Item -ItemType Directory -Path $installerBackup -Force | Out-Null
+    foreach ($item in Get-ChildItem -LiteralPath $installerDestination -Force) {
+      Copy-Item -LiteralPath $item.FullName -Destination $installerBackup -Recurse -Force
+    }
+  }
+  New-Item -ItemType Directory -Path $installerDestination -Force | Out-Null
+  foreach ($item in Get-ChildItem -LiteralPath $installerSource -Force) {
+    Copy-Item -LiteralPath $item.FullName -Destination $installerDestination -Recurse -Force
   }
 }
 
