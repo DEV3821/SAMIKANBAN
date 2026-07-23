@@ -13,7 +13,7 @@ If Not fso.FolderExists(cacheRoot) Then fso.CreateFolder(cacheRoot)
 If Not fso.FolderExists(localTools) Then fso.CreateFolder(localTools)
 bootstrap = fso.BuildPath(localTools, "bootstrap_kanban.ps1")
 fso.CopyFile sourceBootstrap, bootstrap, True
-command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & bootstrap & """"
+command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & bootstrap & """ -AllowLocalFallback"
 If Left(appRoot, 2) = "\\" Then command = command & " -TeamRoot """ & appRoot & """"
 For i = 0 To WScript.Arguments.Count - 1
   command = command & " """ & WScript.Arguments(i) & """"

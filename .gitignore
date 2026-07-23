@@ -61,11 +61,15 @@ runtime/
 .localappdata/
 
 # Backups/recovery
+.backups/
 backups/
 backup/
 RECOVERY_*/
 *_backup_*/
 *.bak-*
+
+# Editor/runtime temp artifacts
+.hermes-tmp.*
 
 # Local operational utilities
 tools/apply_robyn_feedback.ps1

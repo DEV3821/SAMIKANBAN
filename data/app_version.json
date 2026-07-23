@@ -1,6 +1,6 @@
 {
-    "version":  "2026.07.02.001",
-    "releasedAt":  "2026-07-02T09:28:30.3407952+09:30",
-    "message":  "SAMI branding and per-user installer",
+    "version":  "2026.07.17.081709",
+    "releasedAt":  "2026-07-17T08:17:09.0000000+09:30",
+    "message":  "Copy Project Context summary for AI, successful-save chime with sound preference, silent remote refresh, live filtered lane counts and empty states, fixed Files panel, Meeting Pack exports, corrected workflow lane palette",
     "requiresReload":  true
 }

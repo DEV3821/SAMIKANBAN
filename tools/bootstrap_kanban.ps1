@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [string]$TeamRoot,
   [int]$Port = 8011,
@@ -105,6 +105,24 @@ function Test-FileWritableWithoutChange {
     $stream.Dispose()
     return $true
   } catch { return $false }
+}
+
+# Exception-safe canonical-path probes. A Team ESMI UNC path that is currently
+# unreachable makes Test-Path -LiteralPath -PathType (Leaf|Container) THROW a
+# System.IO.IOException ("The network path was not found") instead of returning
+# $false when $ErrorActionPreference='Stop'. These wrappers always return a
+# boolean so an unavailable shared root can never abort local-first startup.
+function Test-CanonicalPathSafe {
+  param([string]$Path, [string]$PathType = 'Any')
+  try {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    if ($PathType -eq 'Leaf') { return [bool](Test-Path -LiteralPath $Path -PathType Leaf) }
+    if ($PathType -eq 'Container') { return [bool](Test-Path -LiteralPath $Path -PathType Container) }
+    return [bool](Test-Path -LiteralPath $Path)
+  } catch {
+    Write-BootstrapLog "Canonical path probe suppressed exception (unavailable shared root): $Path -> $($_.Exception.GetType().FullName): $($_.Exception.Message)"
+    return $false
+  }
 }
 
 function Copy-CanonicalCacheFile {
@@ -351,12 +369,12 @@ try {
   Write-BootstrapLog "Application content source: $sourceRoot"
 
   $runtimeServeScript = [System.IO.Path]::GetFullPath((Join-Path $runtimeRoot 'serve_kanban.ps1'))
-  # Keep the locally installed server implementation active until an explicit Team deployment occurs.
-  $sourceServeScript = [System.IO.Path]::GetFullPath((Join-Path $appRoot 'serve_kanban.ps1'))
+  # Team deployments are authoritative when reachable; local cache remains the offline fallback.
+  $sourceServeScript = [System.IO.Path]::GetFullPath((Join-Path $sourceRoot 'serve_kanban.ps1'))
   if (-not (Test-Path -LiteralPath $sourceServeScript -PathType Leaf)) {
-    $canonicalServeFallback = [System.IO.Path]::GetFullPath((Join-Path $sourceRoot 'serve_kanban.ps1'))
-    Write-BootstrapLog "Local serve_kanban.ps1 not found; checking application source: $canonicalServeFallback"
-    $sourceServeScript = Assert-RequiredFile -Path $canonicalServeFallback -Purpose 'server source fallback'
+    $localServeFallback = [System.IO.Path]::GetFullPath((Join-Path $appRoot 'serve_kanban.ps1'))
+    Write-BootstrapLog "Application source serve_kanban.ps1 not found; checking local cache: $localServeFallback"
+    $sourceServeScript = Assert-RequiredFile -Path $localServeFallback -Purpose 'server source fallback'
   } else {
     $sourceServeScript = Assert-RequiredFile -Path $sourceServeScript -Purpose 'server source'
   }
@@ -385,6 +403,10 @@ try {
   Write-BootstrapLog "Copy server script: $sourceServeScript -> $runtimeServeScript"
   Copy-Item -LiteralPath $sourceServeScript -Destination $runtimeServeScript -Force
   $runtimeServeScript = Assert-RequiredFile -Path $runtimeServeScript -Purpose 'runtime server launch'
+  $sourceMeetingPack = Assert-RequiredFile -Path (Join-Path $sourceRoot 'meeting_pack.ps1') -Purpose 'Meeting Pack server module'
+  $runtimeMeetingPack = Join-Path $runtimeRoot 'meeting_pack.ps1'
+  Copy-Item -LiteralPath $sourceMeetingPack -Destination $runtimeMeetingPack -Force
+  [void](Assert-RequiredFile -Path $runtimeMeetingPack -Purpose 'runtime Meeting Pack server module')
 
   if ($teamReachable) {
     Copy-CanonicalCacheFile 'data\projects.json'
@@ -398,9 +420,19 @@ try {
   $canonicalProjectsPath = Join-Path $canonicalRoot 'data\projects.json'
   $canonicalAuditPath = Join-Path $canonicalRoot 'data\card_updates.jsonl'
   $canonicalProjectFilesPath = Join-Path $canonicalRoot 'project_files'
-  Write-BootstrapLog "Canonical projects readable: $([bool](Test-Path -LiteralPath $canonicalProjectsPath -PathType Leaf)); writable: $(Test-FileWritableWithoutChange $canonicalProjectsPath)"
-  Write-BootstrapLog "Canonical audit readable: $([bool](Test-Path -LiteralPath $canonicalAuditPath -PathType Leaf)); writable: $(Test-FileWritableWithoutChange $canonicalAuditPath)"
-  Write-BootstrapLog "Canonical project_files readable: $([bool](Test-Path -LiteralPath $canonicalProjectFilesPath -PathType Container))"
+  Write-BootstrapLog "Local app root found: $appRoot"
+  if ($teamReachable) {
+    Write-BootstrapLog "Shared Team ESMI root available: $canonicalRoot"
+  } else {
+    Write-BootstrapLog "Shared Team ESMI root unavailable: $canonicalRoot"
+    Write-BootstrapLog "Starting in local-fallback mode"
+  }
+  # These probes must never throw when the shared root is unreachable.
+  Write-BootstrapLog "Canonical projects readable: $(Test-CanonicalPathSafe $canonicalProjectsPath 'Leaf'); writable: $(Test-FileWritableWithoutChange $canonicalProjectsPath)"
+  Write-BootstrapLog "Canonical audit readable: $(Test-CanonicalPathSafe $canonicalAuditPath 'Leaf'); writable: $(Test-FileWritableWithoutChange $canonicalAuditPath)"
+  Write-BootstrapLog "Canonical project_files readable: $(Test-CanonicalPathSafe $canonicalProjectFilesPath 'Container')"
+  Write-BootstrapLog "Local cached portfolio data root: $runtimeRoot"
+  if (-not $teamReachable) { Write-BootstrapLog "Shared connectivity retry scheduled" }
 
   $iconPath = Join-Path $runtimeRoot 'assets\sami_project_portfolio.ico'
   Write-BootstrapLog "Icon status: $(if (Test-Path -LiteralPath $iconPath -PathType Leaf) { "available at $iconPath" } else { "missing at $iconPath; Windows default will be used" })"
@@ -417,7 +449,9 @@ try {
   $health = Get-Health
   if ($health -and $health.ok -and $health.app -eq $ProductName -and $health.serverScriptHash) {
     $runtimeServerHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $runtimeServeScript).Hash.ToLowerInvariant()
+    $runtimeMeetingPackHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $runtimeMeetingPack).Hash.ToLowerInvariant()
     $serverNeedsRestart = [string]$health.serverScriptHash -ne $runtimeServerHash -or
+      [string]$health.meetingPackModuleHash -ne $runtimeMeetingPackHash -or
       [string]$health.mode -ne $runtimeMode -or
       -not ([string]$health.canonicalRoot).Equals($canonicalRoot, [System.StringComparison]::OrdinalIgnoreCase)
     if ($serverNeedsRestart) {

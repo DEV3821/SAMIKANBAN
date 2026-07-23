@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [string]$SourcePath = 'C:\Tools\SAMI-Kanban-WorkServer',
   [string]$TeamRoot,
@@ -9,40 +9,42 @@ param(
 $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($TeamRoot)) { $TeamRoot = $env:SAMI_KANBAN_TEAM_ROOT }
 if ([string]::IsNullOrWhiteSpace($TeamRoot)) { throw 'Team ESMI path is required. Set SAMI_KANBAN_TEAM_ROOT or run with -TeamRoot.' }
-$SourcePath = [System.IO.Path]::GetFullPath($SourcePath)
-$TeamRoot = [System.IO.Path]::GetFullPath($TeamRoot)
+$SourcePath = [System.IO.Path]::GetFullPath($SourcePath).TrimEnd('\')
+$TeamRoot = [System.IO.Path]::GetFullPath($TeamRoot).TrimEnd('\')
 if (-not (Test-Path -LiteralPath $SourcePath -PathType Container)) { throw "Source path not found: $SourcePath" }
 if (-not (Test-Path -LiteralPath $TeamRoot -PathType Container)) { throw "Team ESMI path not found: $TeamRoot" }
 if ($SourcePath.Equals($TeamRoot, [System.StringComparison]::OrdinalIgnoreCase)) { throw 'SourcePath and TeamRoot must be different folders.' }
-if ([string]::IsNullOrWhiteSpace($Version)) { $Version = Get-Date -Format 'yyyy.MM.dd.HHmmss' }
+if ([System.IO.Path]::GetFileName($TeamRoot) -ne 'SAMI-Kanban-WorkServer') { throw "TeamRoot must be the SAMI-Kanban-WorkServer application folder: $TeamRoot" }
 
-$versionPayload = [ordered]@{
-  version = $Version
-  releasedAt = (Get-Date).ToString('o')
-  message = $Message
-  requiresReload = $true
-}
 $sourceVersion = Join-Path $SourcePath 'data\app_version.json'
-New-Item -ItemType Directory -Path (Split-Path -Parent $sourceVersion) -Force | Out-Null
-[System.IO.File]::WriteAllText($sourceVersion, (($versionPayload | ConvertTo-Json) + [Environment]::NewLine), [System.Text.UTF8Encoding]::new($false))
+$sourceVersionPayload = Get-Content -LiteralPath $sourceVersion -Raw | ConvertFrom-Json
+if ([string]::IsNullOrWhiteSpace($Version)) { $Version = [string]$sourceVersionPayload.version }
+if ([string]$sourceVersionPayload.version -ne $Version) { throw "Requested version '$Version' does not match source app_version.json '$($sourceVersionPayload.version)'." }
 $installerPayloadVersion = Join-Path $SourcePath 'dist\SAMI_Project_Portfolio_User_Installer\payload\data\app_version.json'
 if (Test-Path -LiteralPath $installerPayloadVersion -PathType Leaf) {
-  Copy-Item -LiteralPath $sourceVersion -Destination $installerPayloadVersion -Force
+  if ((Get-FileHash -Algorithm SHA256 -LiteralPath $sourceVersion).Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath $installerPayloadVersion).Hash) {
+    throw 'Packaged app_version.json does not match the validated source release.'
+  }
 }
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $backupRoot = Join-Path $TeamRoot "backups\app-deploy-$stamp"
 $files = @(
-  'index.html','manifest.webmanifest','serve_kanban.ps1','run_kanban.bat','run_kanban_debug.bat','run_kanban_silent.vbs',
-  'install_sami_project_portfolio.ps1','tools\bootstrap_kanban.ps1','tools\launch_sami_portfolio.vbs',
-  'tools\deploy_to_team_esmi.ps1','data\app_version.json','README.md','assets\README.md'
+  'index.html','manifest.webmanifest','serve_kanban.ps1','meeting_pack.ps1','run_kanban.bat','run_kanban_debug.bat','run_kanban_silent.vbs',
+  'install_sami_project_portfolio.ps1','tools\bootstrap_kanban.ps1','tools\setup_meeting_pack_pin.ps1','tools\launch_sami_portfolio.vbs',
+  'tools\deploy_to_team_esmi.ps1','Repair_SAMI_Project_Portfolio_Icon.ps1','Repair_SAMI_Project_Portfolio_Icon.bat',
+  'data\app_version.json','README.md','assets\README.md'
 )
+$protected = '^(?i)(data\\(?:projects(?:\.example)?\.json|card_updates\.jsonl|kanban_config\.json|project_file_index\.json|card_activity_index\.json)|project_files(?:\\|$)|backups(?:\\|$)|logs(?:\\|$))'
 
 function Deploy-File {
-  param([string]$RelativePath)
-  $source = Join-Path $SourcePath $RelativePath
+  param([string]$RelativePath, [string]$SourceFile)
+  if ($RelativePath -match $protected) { throw "Protected runtime path rejected: $RelativePath" }
+  $source = if ($SourceFile) { [System.IO.Path]::GetFullPath($SourceFile) } else { [System.IO.Path]::GetFullPath((Join-Path $SourcePath $RelativePath)) }
   if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { return }
-  $destination = Join-Path $TeamRoot $RelativePath
+  $destination = [System.IO.Path]::GetFullPath((Join-Path $TeamRoot $RelativePath))
+  $teamPrefix = $TeamRoot + '\'
+  if (-not $destination.StartsWith($teamPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { throw "Destination escaped TeamRoot: $destination" }
   if (Test-Path -LiteralPath $destination -PathType Leaf) {
     $backup = Join-Path $backupRoot $RelativePath
     New-Item -ItemType Directory -Path (Split-Path -Parent $backup) -Force | Out-Null
@@ -50,6 +52,7 @@ function Deploy-File {
   }
   New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
   Copy-Item -LiteralPath $source -Destination $destination -Force
+  Write-Host "DEPLOYED $RelativePath"
 }
 
 foreach ($relative in $files) { Deploy-File $relative }
@@ -63,18 +66,10 @@ if (Test-Path -LiteralPath $assetRoot -PathType Container) {
 
 $installerSource = Join-Path $SourcePath 'dist\SAMI_Project_Portfolio_User_Installer'
 if (Test-Path -LiteralPath $installerSource -PathType Container) {
-  $installerDestination = Join-Path $TeamRoot 'installers\SAMI_Project_Portfolio_User_Installer'
-  $installerBackup = Join-Path $backupRoot 'installers\SAMI_Project_Portfolio_User_Installer'
-  if (Test-Path -LiteralPath $installerDestination -PathType Container) {
-    New-Item -ItemType Directory -Path $installerBackup -Force | Out-Null
-    foreach ($item in Get-ChildItem -LiteralPath $installerDestination -Force) {
-      Copy-Item -LiteralPath $item.FullName -Destination $installerBackup -Recurse -Force
-    }
-  }
-  New-Item -ItemType Directory -Path $installerDestination -Force | Out-Null
-  foreach ($item in Get-ChildItem -LiteralPath $installerSource -Force) {
-    Copy-Item -LiteralPath $item.FullName -Destination $installerDestination -Recurse -Force
+  Get-ChildItem -LiteralPath $installerSource -File -Recurse | ForEach-Object {
+    $installerRelative = $_.FullName.Substring($installerSource.Length).TrimStart('\')
+    Deploy-File -RelativePath (Join-Path 'installers\SAMI_Project_Portfolio_User_Installer' $installerRelative) -SourceFile $_.FullName
   }
 }
 
-Write-Host 'Deployment complete. Ask users to close their Kanban tab and click the SAMI Project Portfolio shortcut once to load the new UI.'
+Write-Host "Deployment complete. Backup: $backupRoot"

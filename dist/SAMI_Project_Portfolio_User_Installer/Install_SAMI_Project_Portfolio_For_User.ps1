@@ -48,7 +48,7 @@ try {
   $TeamRoot = [System.IO.Path]::GetFullPath($TeamRoot).TrimEnd('\')
   Write-InstallLog "Configured Team ESMI root: $TeamRoot"
 
-  foreach ($required in @('index.html','manifest.webmanifest','serve_kanban.ps1','tools\bootstrap_kanban.ps1','assets\sami_project_portfolio.ico')) {
+  foreach ($required in @('index.html','manifest.webmanifest','serve_kanban.ps1','tools\bootstrap_kanban.ps1','assets\sami_project_portfolio_v2.ico')) {
     $requiredPath = Join-Path $payloadRoot $required
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) { throw "Installer payload is incomplete: $required" }
   }
@@ -57,7 +57,7 @@ try {
     Copy-Item -LiteralPath $item.FullName -Destination $cacheRoot -Recurse -Force
   }
   $localBootstrap = Join-Path $cacheRoot 'tools\bootstrap_kanban.ps1'
-  $iconPath = Join-Path $cacheRoot 'assets\sami_project_portfolio.ico'
+  $iconPath = Join-Path $cacheRoot 'assets\sami_project_portfolio_v2.ico'
   $teamRootVbs = $TeamRoot.Replace('"','""')
   $localBootstrapVbs = $localBootstrap.Replace('"','""')
 

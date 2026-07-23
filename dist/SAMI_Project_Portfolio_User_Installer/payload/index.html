@@ -12,10 +12,26 @@
 <link rel="icon" href="assets/icons/sami_project_portfolio-192.png?v=2026.07.02.001" type="image/png" sizes="192x192">
 <link rel="apple-touch-icon" href="assets/icons/sami_project_portfolio-192.png?v=2026.07.02.001" sizes="192x192">
 <link rel="manifest" href="manifest.webmanifest?v=2026.07.02.001">
+<script>
+  (function () {
+    var key = "samiPortfolioTheme";
+    var saved = null;
+    try { saved = localStorage.getItem(key); } catch (_) {}
+    var theme = saved === "light" || saved === "dark"
+      ? saved
+      : (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+  }());
+</script>
 <style>
   :root {
     --sa-blue: #005EB8;
     --sa-blue-dark: #003E7E;
+    --sa-cyan: #00768E; /* Official SAMI teal — sourced from the bundled SAMI brand (theme-color / meta and CSS accent gradients) */
+    --sami-teal: #00768E; /* Official SAMI teal — canonical brand colour */
+    --sami-teal-deep: #005C70; /* Deeper, more muted SAMI teal for the Done treatment */
+    --sami-teal-ink: #0B3A45; /* Dark SAMI teal for accessible foreground text */
     --sami-mint: #77F0C7;
     --sami-mint-soft: #E7FFF7;
     --sami-mint-mid: #20D8A3;
@@ -26,6 +42,34 @@
     --paper: #FFFFFF;
     --bg: #F3F7FA;
     --bg2: #EAF6F5;
+    /* Unified workflow status colour system (base appearance of every card) */
+    --status-backlog: #6B7280;
+    --status-backlog-bg: #F3F4F6;
+    --status-backlog-pale: #FAFAFB;
+    --status-backlog-soft: #ECEEF1;
+    --status-backlog-ink: #374151;
+    /* --status-ready-future intentionally retained for future compatibility only.
+       It must NOT create a visible Ready lane, filter, count or label in this release. */
+    --status-ready-future: #00768E; /* Official SAMI teal */
+    --status-ready-future-bg: #E6F4F7;
+    --status-ready-future-pale: #F2FAFB;
+    --status-ready-future-soft: #D5EDF1;
+    --status-ready-future-ink: #04525F;
+    --status-in-progress: #00768E;
+    --status-in-progress-bg: #E6F4F7;
+    --status-in-progress-pale: #F2FAFB;
+    --status-in-progress-soft: #D5EDF1;
+    --status-in-progress-ink: #04525F;
+    --status-blocked: #C62828;
+    --status-blocked-bg: #FFF1F1;
+    --status-blocked-pale: #FEF6F6;
+    --status-blocked-soft: #FBDADA;
+    --status-blocked-ink: #8F1B1B;
+    --status-done: #1F9D55; /* Green completion state */
+    --status-done-bg: #E9F7EF;
+    --status-done-pale: #F3FBF6;
+    --status-done-soft: #D6F0E1;
+    --status-done-ink: #136233;
     --blocked: #C62828;
     --blocked-bg: #FFF1F1;
     --ready: #008A6A;
@@ -319,10 +363,11 @@
     border-radius: 999px;
     font-weight: 800;
   }
-  .col-blocked { background: var(--blocked-bg); color: var(--blocked); border: 1px solid #f4b3b3; }
-  .col-ready { background: var(--ready-bg); color: var(--ready); border: 1px solid #9ff0d6; }
-  .col-running { background: var(--running-bg); color: var(--running); border: 1px solid #a7d2ff; }
-  .col-done { background: var(--done-bg); color: var(--done); border: 1px solid #d3d8df; }
+  .col-backlog { background: var(--status-backlog-bg); color: var(--status-backlog-ink); border: 1px solid var(--status-backlog-soft); }
+  .col-ready { background: var(--status-backlog-bg); color: var(--status-backlog-ink); border: 1px solid var(--status-backlog-soft); }
+  .col-running { background: var(--status-in-progress-bg); color: var(--status-in-progress-ink); border: 1px solid var(--status-in-progress-soft); }
+  .col-blocked { background: var(--status-blocked-bg); color: var(--status-blocked-ink); border: 1px solid var(--status-blocked-soft); }
+  .col-done { background: var(--status-done-bg); color: var(--status-done-ink); border: 1px solid var(--status-done-soft); }
   .card {
     background: var(--paper);
     border: 1px solid var(--line);
@@ -334,11 +379,23 @@
     transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
   }
   .card:hover { box-shadow: 0 10px 24px rgba(0,94,184,0.13); transform: translateY(-1px); }
-  .card.s-blocked { border-left-color: var(--blocked); }
-  .card.s-ready { border-left-color: var(--ready); }
-  .card.s-backlog { border-left-color: var(--ready); }
-  .card.s-running { border-left-color: var(--running); }
-  .card.s-done { border-left-color: var(--done); opacity: 0.84; }
+  .card.s-backlog { border-left-color: var(--status-backlog); }
+  .card.s-running { border-left-color: var(--status-in-progress); }
+  .card.s-blocked { border-left-color: var(--status-blocked); }
+  .card.s-done { border-left-color: var(--status-done); opacity: 0.9; }
+  /* Save-success highlight — brief, status-aware, respects reduced motion via global rule */
+  .card.save-flash {
+    animation: saveFlash 1.6s ease-out 1;
+    border-color: var(--sa-cyan);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--sami-teal) 40%, transparent), 0 10px 26px rgba(0,118,142,0.16);
+  }
+  html[data-theme="dark"] .card.save-flash {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--sami-teal) 55%, transparent), 0 10px 26px rgba(0,118,142,0.30);
+  }
+  @keyframes saveFlash {
+    0% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--sami-teal) 60%, transparent), 0 10px 26px rgba(0,118,142,0.20); }
+    100% { box-shadow: 0 0 0 0 transparent, 0 4px 12px rgba(17,24,39,0.06); }
+  }
   .card.highlight {
     border-color: rgba(32,216,163,0.75);
     box-shadow: 0 0 0 2px rgba(119,240,199,0.22), 0 6px 18px rgba(0,168,137,0.10);
@@ -720,9 +777,23 @@
   .badge.stale { background: #fff3e8; border-color: #f0b37e; color: #9a4a10; }
   .badge.blocked { background: var(--blocked-bg); border-color: #f4b3b3; color: var(--blocked); }
   .badge.done { background: var(--done-bg); border-color: #d3d8df; color: var(--done); }
-  .badge.risk-green { border-color: #9ff0d6; color: var(--ready); }
-  .badge.risk-amber { border-color: #f2cf87; color: var(--next); }
-  .badge.risk-red { border-color: #f4b3b3; color: var(--blocked); }
+  /* Project Health badges — small secondary indicators; never control card colour/border */
+  .badge.health { display: inline-flex; align-items: center; gap: 0.22rem; border-radius: 999px; border: 1px solid; background: #fff; font-weight: 750; }
+  .badge.health .health-icon { width: 0.78rem; height: 0.78rem; flex: 0 0 auto; display: inline-block; }
+  .badge.health-ontrack { border-color: #9ff0d6; color: var(--status-in-progress-ink); background: var(--status-in-progress-bg); }
+  .badge.health-needs { border-color: #f2cf87; color: #8a5a10; background: var(--next-bg); }
+  .badge.health-atrisk { border-color: #f4b3b3; color: var(--status-blocked-ink); background: var(--status-blocked-bg); }
+  .badge.health-notassessed { border-color: var(--status-backlog-soft); color: var(--status-backlog-ink); background: var(--status-backlog-bg); }
+  /* Legacy risk-colour classes retained for safe rendering of stored data */
+  .badge.risk-green { border-color: #9ff0d6; color: var(--status-in-progress-ink); background: var(--status-in-progress-bg); }
+  .badge.risk-amber { border-color: #f2cf87; color: #8a5a10; background: var(--next-bg); }
+  .badge.risk-red { border-color: #f4b3b3; color: var(--status-blocked-ink); background: var(--status-blocked-bg); }
+  /* Workflow status pills and accents */
+  .badge.status-pill { border: 1px solid; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; }
+  .badge.status-backlog { background: var(--status-backlog-bg); border-color: var(--status-backlog); color: var(--status-backlog-ink); }
+  .badge.status-running { background: var(--status-in-progress-bg); border-color: var(--status-in-progress); color: var(--status-in-progress-ink); }
+  .badge.status-blocked { background: var(--status-blocked-bg); border-color: var(--status-blocked); color: var(--status-blocked-ink); }
+  .badge.status-done { background: var(--status-done-bg); border-color: var(--status-done); color: var(--status-done-ink); }
   .badge.updated {
     background: #fff;
     border-color: rgba(0,118,142,0.18);
@@ -733,6 +804,8 @@
     border-color: #9ff0d6;
     color: #006a55;
   }
+
+  .badge.updated.just-now { background: var(--sami-mint-soft); border-color: #9ff0d6; color: #006a55; font-weight: 800; }
   .badge.updated.week {
     background: var(--running-bg);
     border-color: #a7d2ff;
@@ -825,6 +898,17 @@
     background: #f8fafc;
   }
   .drawer-files[hidden] { display: none; }
+
+  .drawer-sound-settings {
+    border-top: 1px solid var(--line, #e4e9ee);
+    margin-top: 0.85rem; padding-top: 0.7rem;
+  }
+  .drawer-sound-settings h3 { margin: 0 0 0.5rem; color: var(--sa-blue-dark); font-size: 0.82rem; }
+  .sound-setting-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+  .sound-setting-row label { font-weight: 700; font-size: 0.82rem; }
+  .sound-setting-row select { padding: 0.45rem 0.6rem; border: 1px solid var(--line, #d6dde3); border-radius: 8px; background: var(--paper, #f8fafb); color: var(--ink, #173640); font: inherit; }
+  .sound-test-btn { padding: 0.45rem 0.8rem; border: 1px solid var(--line, #d6dde3); border-radius: 8px; background: var(--surface, #fff); color: var(--ink, #173640); font: inherit; font-weight: 700; cursor: pointer; }
+  .sound-test-btn:hover { border-color: #00768e; }
   .drawer-files h3 { margin: 0 0 0.55rem; color: var(--sa-blue-dark); font-size: 0.82rem; }
   .drawer-file-counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.3rem 0.75rem; }
   .drawer-file-counts div { display: flex; justify-content: space-between; gap: 0.5rem; color: var(--charcoal); font-size: 0.7rem; }
@@ -1156,7 +1240,7 @@
     overflow-wrap: anywhere;
   }
   .presentation-card.s-blocked { border-left-color: var(--blocked); }
-  .presentation-card.s-backlog { border-left-color: var(--ready); }
+  .presentation-card.s-backlog { border-left-color: var(--status-backlog); }
   .presentation-card.s-running { border-left-color: var(--running); }
   .presentation-card.s-done { border-left-color: var(--done); }
   .presentation-card-title {
@@ -1369,6 +1453,672 @@
   .app-update-banner.open { display:flex; }
   .app-update-banner button { border-color:#087f8c; background:#fff; color:#075d66; font-weight:700; }
   body.presentation-active .app-update-banner { display:none !important; }
+
+  /* 2026 polished clinical refresh */
+  html[data-theme="light"] {
+    --sa-blue: #005eb8;
+    --sa-blue-dark: #003e7e;
+    --sami-mint: #77f0c7;
+    --sami-mint-soft: #e8fbf5;
+    --sami-mint-mid: #13b98a;
+    --ink: #102132;
+    --charcoal: #405467;
+    --muted: #687b8d;
+    --line: #d5e0e8;
+    --paper: #ffffff;
+    --bg: #f2f7fa;
+    --bg2: #e8f4f3;
+    --surface-raised: #ffffff;
+    --surface-soft: #f7fafc;
+    --surface-glass: rgba(255,255,255,0.84);
+    --surface-column: rgba(248,251,253,0.78);
+    --surface-input: #ffffff;
+    --shadow-soft: 0 8px 24px rgba(19,52,77,0.08);
+    --shadow-raised: 0 18px 48px rgba(0,62,126,0.12);
+  }
+  html[data-theme="dark"] {
+    --sa-blue: #2597e8;
+    --sa-blue-dark: #8bcaff;
+    --sami-mint: #65e7bd;
+    --sami-mint-soft: #123c35;
+    --sami-mint-mid: #36d4a5;
+    --ink: #edf6fc;
+    --charcoal: #c1d0dc;
+    --muted: #8fa4b5;
+    --line: #2b4255;
+    --paper: #122334;
+    --bg: #08131e;
+    --bg2: #0b1b29;
+    --blocked: #ff8585;
+    --blocked-bg: #3a1d25;
+    --ready: #5ce0ba;
+    --ready-bg: #153a34;
+    --running: #70baff;
+    --running-bg: #142f4a;
+    --done: #a9b8c5;
+    --done-bg: #263443;
+    --next: #ffc267;
+    --next-bg: #3c2c17;
+    --highlight: #4ee2bd;
+    --surface-raised: #122334;
+    --surface-soft: #0e1c2a;
+    --surface-glass: rgba(18,35,52,0.86);
+    --surface-column: rgba(14,29,43,0.88);
+    --surface-input: #0d1c2a;
+    --shadow-soft: 0 8px 26px rgba(0,0,0,0.24);
+    --shadow-raised: 0 20px 54px rgba(0,0,0,0.34);
+  }
+  html { background: var(--bg); }
+  body {
+    font-family: Inter, "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
+    background:
+      radial-gradient(circle at 88% 4%, color-mix(in srgb, var(--sami-mint) 22%, transparent), transparent 29rem),
+      radial-gradient(circle at 4% 42%, color-mix(in srgb, var(--sa-blue) 10%, transparent), transparent 32rem),
+      linear-gradient(180deg, var(--surface-soft) 0%, var(--bg) 48%, var(--bg2) 100%);
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+  .topbar {
+    background: var(--surface-glass);
+    border-color: color-mix(in srgb, var(--line) 82%, var(--sa-blue));
+    border-radius: 18px;
+    box-shadow: var(--shadow-raised);
+    backdrop-filter: blur(16px);
+  }
+  .brand-strip { height: 6px; }
+  .header { padding: 1rem 1.1rem; }
+  .brand { gap: 1rem; }
+  .brand img {
+    width: min(340px, 42vw);
+    padding: 0.38rem 0.5rem;
+    background: #fff;
+    border: 1px solid #d8e1e8;
+    border-radius: 10px;
+  }
+  .title-block { padding-left: 1rem; }
+  .title-block h1 { font-size: 1.28rem; letter-spacing: -0.035em; }
+  .title-block .subtitle { letter-spacing: 0.06em; }
+  .header-right { justify-content: flex-end; }
+  .sync-indicator {
+    background: var(--surface-glass);
+    border-color: color-mix(in srgb, var(--line) 78%, var(--sa-blue));
+    border-radius: 12px;
+  }
+  .app-version-meta { color: var(--muted); }
+  .theme-toggle {
+    min-width: 7.3rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.42rem;
+    background: var(--surface-soft);
+  }
+  .theme-toggle-icon { font-size: 1rem; line-height: 1; }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  body > .toolbar {
+    padding: 0.65rem;
+    background: var(--surface-glass);
+    border: 1px solid var(--line);
+    border-radius: 15px;
+    box-shadow: var(--shadow-soft);
+    backdrop-filter: blur(12px);
+  }
+  .board-search {
+    margin-left: auto;
+    min-width: min(31rem, 100%);
+    display: flex;
+    align-items: center;
+    gap: 0.42rem;
+    padding: 0.28rem 0.34rem 0.28rem 0.72rem;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-input);
+    box-shadow: inset 0 1px 1px rgba(17,24,39,0.03);
+  }
+  .search-icon { color: var(--muted); font-size: 1rem; }
+  .board-search input {
+    min-width: 9rem;
+    flex: 1;
+    border: 0;
+    outline: 0;
+    padding: 0.38rem 0.1rem;
+    background: transparent;
+    color: var(--ink);
+    font: inherit;
+  }
+  .board-search input::placeholder { color: var(--muted); }
+  .search-result-count {
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-weight: 750;
+    white-space: nowrap;
+  }
+  .search-clear { padding: 0.34rem 0.5rem; }
+  .search-clear[hidden] { display: none; }
+  .overview-panel, .recent-strip, .health-panel, .review-card, .summary-box {
+    background: var(--surface-glass);
+    border-color: var(--line);
+    box-shadow: var(--shadow-soft);
+    backdrop-filter: blur(12px);
+  }
+  .stat, .summary-tile {
+    background: var(--surface-raised);
+    border-color: var(--line);
+    box-shadow: 0 4px 14px rgba(19,52,77,0.05);
+  }
+  .board { gap: 1rem; }
+  .column {
+    padding: 0.68rem;
+    background: var(--surface-column);
+    border-color: var(--line);
+    border-radius: 16px;
+    box-shadow: 0 6px 22px rgba(18,42,62,0.06);
+    backdrop-filter: blur(10px);
+  }
+  .col-header { border-radius: 11px; padding: 0.72rem 0.78rem; }
+  .col-header .count { background: var(--surface-glass); }
+  .card {
+    border-radius: 13px;
+    padding: 0.82rem 0.86rem;
+    margin-bottom: 0.65rem;
+    box-shadow: 0 5px 16px rgba(17,35,52,0.07);
+  }
+  .card:hover { box-shadow: 0 14px 30px color-mix(in srgb, var(--sa-blue) 16%, transparent); }
+  button, input, select, textarea { font-family: inherit; }
+  button {
+    background: var(--surface-raised);
+    border-radius: 10px;
+    transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+  }
+  button:hover:not(:disabled) { background: var(--surface-soft); transform: translateY(-1px); }
+  button.primary {
+    background: linear-gradient(135deg, var(--sa-blue), color-mix(in srgb, var(--sa-blue) 72%, var(--sami-mint-mid)));
+    box-shadow: 0 6px 16px color-mix(in srgb, var(--sa-blue) 24%, transparent);
+  }
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--sami-mint) 68%, transparent);
+    outline-offset: 2px;
+  }
+  .project-modal-card, .drawer, .drawer-files, .drawer-activity, .review-card,
+  .presentation-setup, .picker-row, .health-group, .presentation-help-popover,
+  .details-count, .badge, input, select, textarea {
+    background-color: var(--surface-raised);
+    border-color: var(--line);
+    color: var(--ink);
+  }
+  .project-modal-card, .drawer, .presentation-setup { box-shadow: var(--shadow-raised); }
+  .slug-preview, .bulk-preview th { background: var(--surface-soft); }
+  .card-details-panel, .drawer-files, .drawer-activity { background: var(--surface-soft); }
+  .app-update-banner {
+    background: var(--sami-mint-soft);
+    color: var(--charcoal);
+    border-color: var(--sami-mint-mid);
+  }
+  .app-update-banner button { background: var(--surface-raised); color: var(--ink); }
+  html[data-theme="dark"] .topbar,
+  html[data-theme="dark"] body > .toolbar,
+  html[data-theme="dark"] .overview-panel,
+  html[data-theme="dark"] .recent-strip,
+  html[data-theme="dark"] .health-panel,
+  html[data-theme="dark"] .summary-box { border-color: #29455c; }
+  html[data-theme="dark"] .sync-clock { border-color: var(--line); color: var(--charcoal); }
+  html[data-theme="dark"] .card.s-done { opacity: 0.88; }
+  html[data-theme="dark"] .col-blocked { border-color: #713944; }
+  html[data-theme="dark"] .col-ready { border-color: #2d6658; }
+  html[data-theme="dark"] .col-running { border-color: #345f85; }
+  html[data-theme="dark"] .col-done { border-color: #4b5c6b; }
+  html[data-theme="dark"] .badge.stale { background: #40291b; border-color: #865735; color: #ffc18a; }
+  html[data-theme="dark"] .badge.file-review { background: #352a18; }
+  html[data-theme="dark"] .project-modal { background: rgba(2,8,14,0.72); }
+  html[data-theme="dark"] .drawer-backdrop.open { background: rgba(2,8,14,0.66); }
+  .presentation-theme-toggle { min-width: 7.2rem; }
+  .presentation-overlay[data-presentation-theme="light"] {
+    --ink: #102132;
+    --charcoal: #405467;
+    --muted: #687b8d;
+    --line: #d5e0e8;
+    --paper: #ffffff;
+    --bg: #f2f7fa;
+    --bg2: #e8f4f3;
+    --surface-raised: #ffffff;
+    --surface-soft: #f7fafc;
+    --surface-glass: rgba(255,255,255,0.92);
+  }
+  .presentation-overlay[data-presentation-theme="dark"] {
+    --sa-blue: #2597e8;
+    --sa-blue-dark: #8bcaff;
+    --ink: #edf6fc;
+    --charcoal: #c1d0dc;
+    --muted: #8fa4b5;
+    --line: #2b4255;
+    --paper: #122334;
+    --bg: #08131e;
+    --bg2: #0b1b29;
+    --surface-raised: #122334;
+    --surface-soft: #0e1c2a;
+    --surface-glass: rgba(18,35,52,0.94);
+    --blocked: #ff8585;
+    --blocked-bg: #3a1d25;
+    --ready: #5ce0ba;
+    --ready-bg: #153a34;
+    --running: #70baff;
+    --running-bg: #142f4a;
+    --done: #a9b8c5;
+    --done-bg: #263443;
+    --next: #ffc267;
+    --next-bg: #3c2c17;
+    background: linear-gradient(155deg, #07121d, #0d2333);
+  }
+  .presentation-overlay[data-presentation-theme="dark"] .presentation-slide,
+  .presentation-overlay[data-presentation-theme="dark"] .presentation-card,
+  .presentation-overlay[data-presentation-theme="dark"] .presentation-col,
+  .presentation-overlay[data-presentation-theme="dark"] .presentation-controls,
+  .presentation-overlay[data-presentation-theme="dark"] .presentation-help-popover {
+    background: var(--surface-raised);
+    border-color: var(--line);
+    color: var(--ink);
+  }
+  .presentation-overlay[data-presentation-theme="dark"] .presentation-splash {
+    background: radial-gradient(circle at 70% 22%, rgba(101,231,189,0.17), transparent 26rem), var(--surface-raised);
+  }
+  .presentation-overlay[data-presentation-theme="dark"] .presentation-stage {
+    background: radial-gradient(circle at 70% 22%, rgba(101,231,189,0.17), transparent 26rem), var(--surface-raised);
+  }
+
+  /* Unified SAMI night palette and readability fixes */
+  html[data-theme="dark"] {
+    --sa-blue: #39aaf0;
+    --sa-blue-dark: #8bd2ff;
+    --sami-mint: #60e7bd;
+    --sami-mint-soft: #123d35;
+    --sami-mint-mid: #2bd3a4;
+    --ink: #f0f7fb;
+    --charcoal: #c7d7e2;
+    --muted: #94adbd;
+    --line: #285069;
+    --paper: #10283a;
+    --bg: #071724;
+    --bg2: #0a2030;
+    --blocked: #f39aa7;
+    --blocked-bg: #2d232e;
+    --ready: #61e1b8;
+    --ready-bg: #123c34;
+    --running: #78c8ff;
+    --running-bg: #123953;
+    --done: #b7c7d2;
+    --done-bg: #263b4a;
+    --next: #f3ca7b;
+    --next-bg: #3a301d;
+    --highlight: #55dfb8;
+    --surface-raised: #10283a;
+    --surface-soft: #0c2131;
+    --surface-glass: rgba(13,34,50,0.94);
+    --surface-column: rgba(10,31,47,0.96);
+    --surface-input: #0d2638;
+    --shadow-soft: 0 9px 26px rgba(0,0,0,0.26);
+    --shadow-raised: 0 20px 54px rgba(0,0,0,0.38);
+  }
+  html[data-theme="dark"] body {
+    overflow-x: hidden;
+    background:
+      radial-gradient(circle at 88% 2%, rgba(43,211,164,0.12), transparent 29rem),
+      radial-gradient(circle at 4% 44%, rgba(57,170,240,0.09), transparent 32rem),
+      linear-gradient(180deg, #081927 0%, var(--bg) 48%, var(--bg2) 100%);
+  }
+  html[data-theme="dark"] .topbar,
+  html[data-theme="dark"] body > .toolbar,
+  html[data-theme="dark"] .overview-panel,
+  html[data-theme="dark"] .recent-strip,
+  html[data-theme="dark"] .health-panel,
+  html[data-theme="dark"] .review-card,
+  html[data-theme="dark"] .summary-box {
+    background: var(--surface-glass);
+    border-color: #28536c;
+  }
+  html[data-theme="dark"] .topbar { box-shadow: 0 18px 48px rgba(0,0,0,0.34); }
+  html[data-theme="dark"] .brand-strip {
+    background: linear-gradient(90deg, #168dd1 0 45%, #2bd3a4 45% 78%, #0b2638 78% 100%);
+  }
+  html[data-theme="dark"] .sync-indicator,
+  html[data-theme="dark"] .theme-toggle,
+  html[data-theme="dark"] .board-search {
+    background: #0d293c;
+    border-color: #2b5871;
+  }
+  html[data-theme="dark"] .theme-toggle:hover,
+  html[data-theme="dark"] body > .toolbar button:hover:not(:disabled) {
+    background: #173c52;
+    color: #f4fbff;
+    border-color: #4380a0;
+  }
+  html[data-theme="dark"] .overview-toggle {
+    background: #102d42;
+    border-color: #2c5871;
+    color: var(--ink);
+    box-shadow: 0 7px 20px rgba(0,0,0,0.18);
+  }
+  html[data-theme="dark"] .overview-toggle:hover {
+    background: #173b52;
+    border-color: #4380a0;
+  }
+  html[data-theme="dark"] .overview-icon {
+    background: var(--sami-mint-mid);
+    box-shadow: inset 0 0 0 3px rgba(7,23,36,0.5), 0 0 0 2px rgba(96,231,189,0.18);
+  }
+  html[data-theme="dark"] .recent-strip-title { color: #9ddcff; }
+  html[data-theme="dark"] .recent-strip-item {
+    background: #102d42;
+    border-color: #2b5871;
+    color: #eaf5fb;
+  }
+  html[data-theme="dark"] .recent-strip-item:hover {
+    background: #173b52;
+    border-color: #4380a0;
+  }
+  html[data-theme="dark"] .recent-strip-item time { color: #a7becd; }
+  html[data-theme="dark"] .recent-toggle.active {
+    background: #15453a;
+    border-color: #3d947a;
+    color: #8ff0ce;
+  }
+  html[data-theme="dark"] .column {
+    background: var(--surface-column);
+    border-color: #244b63;
+    box-shadow: 0 9px 28px rgba(0,0,0,0.2);
+  }
+  html[data-theme="dark"] .col-ready {
+    background: #123b35;
+    border-color: #2e6f5f;
+    color: #74e8c2;
+  }
+  html[data-theme="dark"] .col-running {
+    background: #123954;
+    border-color: #32698d;
+    color: #8bd2ff;
+  }
+  html[data-theme="dark"] .col-blocked {
+    background: #2b2430;
+    border-color: #8f5965;
+    color: #ffe0e2;
+  }
+  html[data-theme="dark"] .col-done {
+    background: #273a49;
+    border-color: #536b7c;
+    color: #c3d0d8;
+  }
+  html[data-theme="dark"] .col-header .count {
+    background: #0b2638;
+    border: 1px solid rgba(139,210,255,0.16);
+    color: #eff9ff;
+  }
+  html[data-theme="dark"] .card {
+    background: #10283a;
+    border-color: #2a5068;
+    box-shadow: 0 7px 20px rgba(0,0,0,0.22);
+  }
+  html[data-theme="dark"] .card:hover {
+    background: #122e42;
+    border-color: #397596;
+    box-shadow: 0 15px 34px rgba(0,0,0,0.3);
+  }
+  html[data-theme="dark"] .card .title { color: #f3f9fd; }
+  html[data-theme="dark"] .card .context { color: #c4d5df; }
+  html[data-theme="dark"] .blocked-bar {
+    background: #2b232d;
+    border-color: #ef8e9a;
+    color: #f8e9ea;
+    box-shadow: inset 0 0 0 1px rgba(239,142,154,0.08);
+  }
+  html[data-theme="dark"] .next-step {
+    background: #102f42;
+    border-color: #38cda4;
+    color: #d8e7ee;
+  }
+  html[data-theme="dark"] .next-step b { color: #75ebc5; }
+  html[data-theme="dark"] button,
+  html[data-theme="dark"] .lead-row input,
+  html[data-theme="dark"] .project-form-grid input,
+  html[data-theme="dark"] .project-form-grid select,
+  html[data-theme="dark"] .project-form-grid textarea,
+  html[data-theme="dark"] #bulkProjectText,
+  html[data-theme="dark"] .form-grid input,
+  html[data-theme="dark"] .form-grid select,
+  html[data-theme="dark"] .form-grid textarea {
+    background: #102c40;
+    border-color: #315b73;
+    color: #eff8fc;
+  }
+  html[data-theme="dark"] .lead-row {
+    color: #eaf5fb;
+  }
+  html[data-theme="dark"] .lead-row > span {
+    color: #77e6c2;
+  }
+  html[data-theme="dark"] .lead-row > b {
+    color: #f5fbff;
+    font-weight: 800;
+  }
+  html[data-theme="dark"] .lead-row input {
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.2);
+  }
+  html[data-theme="dark"] .lead-row input:focus {
+    outline: none;
+    border-color: #58c8ff;
+    box-shadow: 0 0 0 3px rgba(88,200,255,0.16);
+  }
+  html[data-theme="dark"] input::placeholder,
+  html[data-theme="dark"] textarea::placeholder { color: #809bab; }
+  html[data-theme="dark"] select option { background: #10283a; color: #eff8fc; }
+  html[data-theme="dark"] .badge {
+    background: #173448;
+    border-color: #355f76;
+    color: #dbe9f1;
+  }
+  html[data-theme="dark"] .badge.healthy,
+  html[data-theme="dark"] .badge.risk-green {
+    background: #153d35;
+    border-color: #3b8b75;
+    color: #83edca;
+  }
+  html[data-theme="dark"] .badge.needs,
+  html[data-theme="dark"] .badge.risk-amber,
+  html[data-theme="dark"] .badge.file-review {
+    background: #3b311e;
+    border-color: #8a6d34;
+    color: #f4d28c;
+  }
+  html[data-theme="dark"] .badge.blocked,
+  html[data-theme="dark"] .badge.risk-red {
+    background: #2d252f;
+    border-color: #9b5d68;
+    color: #ffe0e2;
+  }
+  html[data-theme="dark"] .form-error,
+  html[data-theme="dark"] .error {
+    color: #ffe0e2;
+    background: #2d252f;
+    border-color: #9b5d68;
+  }
+  html[data-theme="dark"] .bulk-preview tr.invalid td {
+    background: #2d252f;
+    color: #f8e9ea;
+  }
+  html[data-theme="dark"] .badge.done {
+    background: #293d4c;
+    border-color: #5a7282;
+    color: #c7d4dc;
+  }
+  html[data-theme="dark"] .badge.updated,
+  html[data-theme="dark"] .badge.file-count {
+    background: #143148;
+    border-color: #315f7a;
+    color: #b7cbd8;
+  }
+  html[data-theme="dark"] .badge.updated.today {
+    background: #15453a;
+    border-color: #3d947a;
+    color: #90f0cf;
+  }
+
+  /* Copy full project context for AI - restrained action button */
+  .card-copy-ctx { color: var(--muted); font-weight: 700; }
+  .card-copy-ctx:hover { color: var(--sa-cyan-dark); }
+  .card-copy-ctx .copy-ctx-icon { font-size: 0.95rem; line-height: 1; }
+  .card-copy-ctx[aria-label="Project context copied"] { color: #006a55; }
+  /* Manual-copy fallback modal (used when clipboard API is unavailable) */
+  .copy-context-modal {
+    position: fixed; inset: 0; z-index: 1300; display: none;
+    place-items: center; padding: 1rem; background: rgba(7,35,43,0.62);
+  }
+  .copy-context-modal.open { display: grid; }
+  .copy-context-dialog {
+    width: min(760px, 96vw); max-height: 92vh; overflow: auto;
+    background: var(--surface, #fff); border-radius: 16px; padding: 1.25rem;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+  }
+  .copy-context-dialog h2 { margin-top: 0; color: #006b70; }
+  .copy-context-dialog textarea {
+    width: 100%; min-height: 320px; margin: 0.6rem 0; padding: 0.7rem;
+    border: 1px solid var(--line, #d6dde3); border-radius: 9px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.8rem;
+    background: var(--paper, #f8fafb); color: var(--ink, #173640);
+  }
+  html[data-theme="dark"] .badge.updated.week {
+    background: #153a55;
+    border-color: #39769e;
+    color: #9bd9ff;
+  }
+  html[data-theme="dark"] .edit-state {
+    background: #253a49;
+    border-color: #506a7b;
+    color: #c2d0d9;
+  }
+  html[data-theme="dark"] .edit-state.unlocked {
+    background: #15453a;
+    border-color: #3d947a;
+    color: #8ff0ce;
+  }
+  html[data-theme="dark"] .card-details-panel,
+  html[data-theme="dark"] .drawer-files,
+  html[data-theme="dark"] .drawer-activity,
+  html[data-theme="dark"] .slug-preview,
+  html[data-theme="dark"] .bulk-preview th {
+    background: #0c2232;
+    border-color: #294f66;
+  }
+  html[data-theme="dark"] .details-section + .details-section { border-color: #294f66; }
+  html[data-theme="dark"] .details-count { background: #153247; }
+  html[data-theme="dark"] .focus-area,
+  html[data-theme="dark"] .highlight-tag {
+    background: linear-gradient(90deg, #178fce, #2bcfa2);
+    color: #041722;
+  }
+  html[data-theme="dark"] .search-result-count { color: #acc2d0; }
+  html[data-theme="dark"] .search-clear { background: #173b52; }
+  body > .toolbar .board-search {
+    flex: 1 1 28rem;
+    min-width: 18rem;
+  }
+  html { scroll-behavior: smooth; }
+  body > .toolbar {
+    position: sticky;
+    top: 0.55rem;
+    z-index: 18;
+  }
+  .topbar, body > .toolbar, .overview-panel, .recent-strip, .column, .card {
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  }
+  button:active:not(:disabled) { transform: translateY(0) scale(0.98); }
+  .board-search {
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+  }
+  .board-search:focus-within {
+    border-color: var(--sami-mint-mid);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sami-mint) 22%, transparent);
+  }
+  .recent-strip-item { transition: background-color 0.16s ease, border-color 0.16s ease, transform 0.16s ease; }
+  .recent-strip-item:hover { transform: translateY(-1px); }
+  .card .title { letter-spacing: -0.012em; }
+  .card .context, .next-step, .blocker { line-height: 1.48; }
+  .highlight-tag { box-shadow: 0 5px 14px rgba(0,0,0,0.14); }
+  .column:focus-within { border-color: color-mix(in srgb, var(--sa-blue) 52%, var(--line)); }
+  html[data-theme="dark"] body > .toolbar {
+    box-shadow: 0 12px 34px rgba(0,0,0,0.32);
+  }
+  html[data-theme="dark"] .board-search:focus-within {
+    background: #102f43;
+    border-color: #52dcb4;
+    box-shadow: 0 0 0 3px rgba(82,220,180,0.16);
+  }
+  html[data-theme="dark"] button.primary {
+    background: linear-gradient(135deg, #168fd2, #157eae);
+    border-color: #36acee;
+    color: #ffffff;
+    box-shadow: 0 7px 18px rgba(20,143,210,0.24);
+  }
+  html[data-theme="dark"] button.primary:hover:not(:disabled) {
+    background: linear-gradient(135deg, #24a2e8, #168bbd);
+    border-color: #6fc8f8;
+  }
+  html[data-theme="dark"] .presentation-btn .presentation-icon {
+    border-color: #3b7898;
+    background: #0e2b3e;
+  }
+  @media (max-width: 1180px) {
+    .header { align-items: stretch; }
+    .brand { width: 100%; min-width: 0; }
+    .header-right { width: 100%; justify-content: flex-start; }
+    .header-right .app-version-meta { margin-left: auto; align-self: center; }
+    body > .toolbar .board-search { order: 20; flex-basis: 100%; width: 100%; margin-left: 0; }
+  }
+  @media (max-width: 900px) {
+    .board-search { order: 20; width: 100%; margin-left: 0; }
+  }
+  @media (max-width: 700px) {
+    .brand img { width: min(100%, 340px); }
+    .title-block { padding-left: 0.8rem; }
+    .header-right { align-items: stretch; }
+    .theme-toggle { flex: 1; }
+    .search-result-count { display: none; }
+    body > .toolbar { top: 0.25rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      scroll-behavior: auto !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+  .meeting-pack-button { background:#006b70; color:#fff; font-weight:800; box-shadow:0 3px 10px rgba(0,107,112,.25); }
+  .meeting-pack-modal { position:fixed; inset:0; z-index:1200; background:rgba(7,35,43,.62); display:none; place-items:center; padding:1rem; }
+  .meeting-pack-modal.open { display:grid; }
+  .meeting-pack-dialog { width:min(720px,96vw); max-height:92vh; overflow:auto; background:var(--surface,#fff); border-radius:16px; padding:1.25rem; box-shadow:0 20px 60px rgba(0,0,0,.35); }
+  .meeting-pack-dialog h2 { margin-top:0; color:#006b70; }
+  .meeting-pack-grid { display:block; }
+  .meeting-pack-format { margin-top:.25rem; }
+  .meeting-pack-format label { display:block; margin:0 0 .4rem; font-size:.78rem; font-weight:800; color:var(--charcoal); }
+  .meeting-pack-format select { display:block; width:100%; min-height:46px; padding:.65rem .75rem; border:1px solid var(--line); border-radius:9px; background:var(--paper); color:var(--ink); font:inherit; font-weight:700; }
+  .meeting-pack-format select:focus { outline:3px solid rgba(0,118,142,.16); border-color:#00768e; }
+  .meeting-pack-grid fieldset { border:1px solid var(--line); border-radius:10px; padding:.9rem 1rem; }
+  .meeting-pack-grid label { display:block; margin:.45rem 0; }
+  .meeting-pack-grid select { width:100%; padding:.55rem; }
+  .coming-later { color:var(--muted); }
+  .meeting-pack-projects { max-height:180px; overflow:auto; border:1px solid var(--line); border-radius:8px; padding:.5rem; margin-top:.5rem; }
+  .meeting-pack-actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:.6rem; margin-top:1rem; }
+  .meeting-pack-brand { display:flex; align-items:center; gap:.85rem; margin-bottom:1rem; }
+  .meeting-pack-brand img { width:58px; height:58px; object-fit:contain; flex:0 0 58px; }
+  .meeting-pack-brand h2, .meeting-pack-brand p { margin:0; }
+  .meeting-pack-brand p { margin-top:.25rem; color:var(--muted); }
 </style>
 </head>
 <body>
@@ -1401,6 +2151,10 @@
         <span class="sync-copy"><span class="sync-label" id="syncLabel">Checking Team ESMI…</span></span>
         <span class="sync-clock" id="syncClock">--:--</span>
       </div>
+      <button class="theme-toggle" id="themeToggle" type="button" aria-pressed="false">
+        <span class="theme-toggle-icon" id="themeToggleIcon" aria-hidden="true">&#9790;</span>
+        <span id="themeToggleLabel">Night mode</span>
+      </button>
       <div class="app-version-meta" id="appVersionMeta">App: unknown</div>
     </div>
   </div>
@@ -1417,6 +2171,14 @@
   <button id="lockBtn" style="display:none">Lock Editing</button>
   <button id="reloadBtn">Reload</button>
   <span class="edit-state" id="editState">Editing locked</span>
+  <button class="primary meeting-pack-button" id="meetingPackBtn" type="button">Meeting Pack</button>
+  <div class="board-search" role="search">
+    <span class="search-icon" aria-hidden="true">&#128269;</span>
+    <label class="sr-only" for="boardSearch">Search portfolio cards</label>
+    <input id="boardSearch" type="search" autocomplete="off" placeholder="Search projects, leads, actions..." aria-describedby="searchResultCount">
+    <span class="search-result-count" id="searchResultCount" role="status" aria-live="polite">All cards</span>
+    <button class="search-clear" id="clearSearchBtn" type="button" hidden>Clear</button>
+  </div>
 </div>
 <section class="health-panel" id="healthPanel">
   <div class="health-summary" id="healthSummary"></div>
@@ -1449,7 +2211,7 @@
         <div class="span-2"><label for="pTitle">Project name *</label><input id="pTitle" maxlength="200" autocomplete="off"></div>
         <div><label for="pStatus">Status *</label><select id="pStatus"><option value="backlog">Backlog</option><option value="running">In Progress</option><option value="blocked">Blocked</option><option value="done">Done</option></select></div>
         <div><label for="pLead">Lead</label><input id="pLead" maxlength="80" autocomplete="off"></div>
-        <div><label for="pRisk">Risk</label><select id="pRisk"><option value="green">Green</option><option value="amber">Amber</option><option value="red">Red</option></select></div>
+        <div><label for="pRisk">Project health</label><select id="pRisk"><option value="green">On track</option><option value="amber">Needs attention</option><option value="red">At risk</option></select></div>
         <div><label for="pReviewDate">Review date</label><input id="pReviewDate" type="date"></div>
         <div class="span-2"><label for="pCurrentStatus">Current status / summary</label><textarea id="pCurrentStatus"></textarea></div>
         <div class="span-2"><label for="pNextAction">Next action</label><textarea id="pNextAction"></textarea></div>
@@ -1515,6 +2277,7 @@
       <div class="presentation-message" id="fullscreenMessage"></div>
     </div>
     <div class="presentation-controls">
+      <button id="presentationThemeToggle" class="presentation-theme-toggle" type="button" aria-pressed="false">Night view</button>
       <div class="presentation-help-wrap">
         <button id="presentationHelpBtn" class="presentation-help-btn" title="Presentation controls" aria-label="Presentation controls" aria-expanded="false">?</button>
         <div class="presentation-help-popover" id="presentationHelp" role="dialog" aria-label="Presentation controls">
@@ -1547,11 +2310,11 @@
       <input id="fOwner" autocomplete="off">
     </div>
     <div>
-      <label for="fRisk">Risk</label>
+      <label for="fRisk">Project health</label>
       <select id="fRisk">
-        <option value="green">Green</option>
-        <option value="amber">Amber</option>
-        <option value="red">Red</option>
+        <option value="green">On track</option>
+        <option value="amber">Needs attention</option>
+        <option value="red">At risk</option>
       </select>
     </div>
     <div class="span-2">
@@ -1592,6 +2355,18 @@
     <div class="drawer-file-counts" id="drawerFileCounts"></div>
     <div class="drawer-file-actions" id="drawerFileActions"></div>
   </section>
+  <section class="drawer-sound-settings" aria-label="Update sound settings">
+    <h3 id="soundSettingsTitle">Update sounds</h3>
+    <div class="sound-setting-row">
+      <label for="updateSoundPref">Update sounds</label>
+      <select id="updateSoundPref">
+        <option value="off">Off</option>
+        <option value="low">Low</option>
+        <option value="normal">Normal</option>
+      </select>
+      <button type="button" id="playTestSoundBtn" class="sound-test-btn">Play test sound</button>
+    </div>
+  </section>
   <section class="drawer-activity" id="drawerActivity" aria-labelledby="drawerActivityTitle" hidden>
     <h3 id="drawerActivityTitle">Activity Log</h3>
     <div id="drawerActivityItems"></div>
@@ -1607,47 +2382,58 @@
   </div>
 </aside>
 
+<div class="meeting-pack-modal" id="meetingPackModal" role="dialog" aria-modal="true" aria-labelledby="meetingPackTitle">
+  <div class="meeting-pack-dialog">
+    <div class="meeting-pack-brand"><img src="assets/sami_project_portfolio.ico" alt=""><div><h2 id="meetingPackTitle">SAMI Meeting Pack</h2><p>Export every card in the current Kanban order.</p></div></div>
+    <div class="meeting-pack-format">
+      <label for="meetingPackFormat">Export format</label>
+      <select id="meetingPackFormat">
+        <option value="pdf">SAMI-branded PDF</option>
+        <option value="xlsx">Excel workbook (.xlsx)</option>
+        <option value="md">Structured Markdown (.md)</option>
+        <option disabled>Word (Coming later)</option>
+        <option disabled>PDF + Excel ZIP (Coming later)</option>
+      </select>
+    </div>
+    <p id="meetingPackStatus" role="status" aria-live="polite"></p>
+    <div class="meeting-pack-actions"><button id="meetingPackCancel" type="button">Cancel</button><button class="primary" id="meetingPackAuthorised" type="button">Generate</button></div>
+  </div>
+</div>
 <script>
+/* The application has exactly four real workflow lanes: Backlog, In Progress,
+   Blocked and Done. A fifth "Ready" lane is intentionally NOT rendered in this
+   release; the --status-ready-future theme variable remains only for future use. */
 const COLS = [
-  { key: "blocked", label: "Blocked", cls: "col-blocked", icon: "⊘" },
-  { key: "ready",   label: "Ready",   cls: "col-ready",   icon: "▶" },
+  { key: "backlog", label: "Backlog", cls: "col-backlog", icon: "▤" },
   { key: "running", label: "In Progress", cls: "col-running", icon: "●" },
+  { key: "blocked", label: "Blocked", cls: "col-blocked", icon: "⊘" },
   { key: "done",    label: "Done",    cls: "col-done",    icon: "✓" }
 ];
 const DEFAULT_CONFIG = {
-  wipLimits: { "Blocked": 99, "Ready": 99, "In Progress": 10, "Done": 99 },
+  wipLimits: { "Backlog": 99, "In Progress": 10, "Blocked": 99, "Done": 99 },
   staleThresholdDays: 14,
   blockedThresholdDays: 7,
   editProtection: { enabled: true, sessionMinutes: 120 },
   columnPolicies: {
-    "Blocked": "Blocked work must have a blocker reason or named waiting-on party.",
-    "Ready": "Ready work is a candidate for action or ownership.",
+    "Backlog": "Backlog work is not currently being worked on, including work not resourced, waiting its turn, or not yet prioritised.",
     "In Progress": "Active work should have an owner, next action, review date, and recent update.",
+    "Blocked": "Blocked work must have a blocker reason or named waiting-on party.",
     "Done": "Done work should record an outcome or evidence source."
   }
 };
-const STATUS_LABELS = { blocked: "Blocked", ready: "Ready", running: "In Progress", done: "Done" };
+const STATUS_LABELS = { backlog: "Backlog", running: "In Progress", blocked: "Blocked", done: "Done" };
 const BACKLOG_DESCRIPTION = "Backlog work is not currently being worked on, including work not resourced, waiting its turn, or not yet prioritised.";
-const BACKLOG_ICON = (COLS.find(c => c.key === "ready") || {}).icon || ">";
-const BLOCKED_ICON = (COLS.find(c => c.key === "blocked") || {}).icon || "!";
-COLS.splice(
-  0,
-  COLS.length,
-  { key: "backlog", label: "Backlog", cls: "col-ready", icon: BACKLOG_ICON },
-  { key: "running", label: "In Progress", cls: "col-running", icon: (COLS.find(c => c.key === "running") || {}).icon || "*" },
-  { key: "blocked", label: "Blocked", cls: "col-blocked", icon: BLOCKED_ICON },
-  { key: "done", label: "Done", cls: "col-done", icon: (COLS.find(c => c.key === "done") || {}).icon || "Done" }
-);
-DEFAULT_CONFIG.wipLimits.Backlog = DEFAULT_CONFIG.wipLimits.Ready || 99;
+const BACKLOG_ICON = (COLS.find(c => c.key === "backlog") || {}).icon || "▤";
+const BLOCKED_ICON = (COLS.find(c => c.key === "blocked") || {}).icon || "⊘";
+DEFAULT_CONFIG.wipLimits.Backlog = DEFAULT_CONFIG.wipLimits.Backlog || 99;
 DEFAULT_CONFIG.columnPolicies.Backlog = BACKLOG_DESCRIPTION;
-DEFAULT_CONFIG.columnPolicies.Ready = BACKLOG_DESCRIPTION;
-STATUS_LABELS.backlog = "Backlog";
-STATUS_LABELS.ready = "Backlog";
 const STORAGE_USER_KEY = "samiKanbanUpdatedBy";
 const EDIT_TOKEN_KEY = "samiKanbanEditToken";
 const EDIT_EXPIRES_KEY = "samiKanbanEditExpires";
 const OVERVIEW_STORAGE_KEY = "samiBoardOverviewOpen";
 const PRESENTATION_STORAGE_KEY = "samiPresentationCardIds";
+const THEME_STORAGE_KEY = "samiPortfolioTheme";
+const PRESENTATION_THEME_STORAGE_KEY = "samiPresentationTheme";
 const SYNC_POLL_MS = 20000;
 let appState = {
   payload: null,
@@ -1665,6 +2451,7 @@ let appState = {
   cardActivityLoadPromise: null,
   bulkRows: [],
   recentFilter: false,
+  searchQuery: "",
   editingIndex: -1,
   reviewQueue: [],
   reviewIndex: 0,
@@ -1684,6 +2471,181 @@ let appState = {
 };
 let splashReady = false;
 let splashCanDismiss = false;
+
+/* ---- Local update-sound preference (stored locally only, never in shared data) ---- */
+const SOUND_PREF_KEY = "samiKanbanUpdateSound"; // "off" | "low" | "normal"
+function getSoundPref() {
+  let v = "low";
+  try { const stored = localStorage.getItem(SOUND_PREF_KEY); if (stored) v = stored; } catch (_) {}
+  return (v === "off" || v === "normal") ? v : "low";
+}
+function setSoundPref(v) {
+  const value = (v === "off" || v === "normal") ? v : "low";
+  try { localStorage.setItem(SOUND_PREF_KEY, value); } catch (_) {}
+  return value;
+}
+function soundVolume() {
+  const pref = getSoundPref();
+  if (pref === "off") return 0;
+  if (pref === "normal") return 0.18;
+  return 0.08; // low
+}
+
+/* Subtle Web Audio confirmation chime. No external files. */
+let _audioCtx = null;
+function getAudioContext() {
+  if (_audioCtx) return _audioCtx;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    _audioCtx = new Ctx();
+  } catch (_) { _audioCtx = null; }
+  return _audioCtx;
+}
+function playUpdateChime(volume) {
+  if (!volume) return;
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  if (ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} }
+  try {
+    const now = ctx.currentTime;
+    const tones = [ { f: 660, t: 0.0, d: 0.12 }, { f: 880, t: 0.08, d: 0.14 } ];
+    tones.forEach(tone => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = tone.f;
+      const start = now + tone.t;
+      const end = start + tone.d;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(volume, start + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, end);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(start); osc.stop(end + 0.02);
+    });
+  } catch (_) {}
+}
+
+/* ---- Authoritative manual-save success path ----
+   Coordinates: save completion, success toast, card highlight, "Updated just now",
+   and the chime. Guards against duplicate execution when both a local persistence
+   callback and a later synchronisation callback observe the same change. */
+let _lastManualSaveKey = "";
+let _lastManualSaveAt = 0;
+function showJustNowBadge(card) {
+  if (!card || !card.id) return;
+  const el = document.getElementById("card-" + CSS.escape(card.id));
+  if (!el) return;
+  const badge = el.querySelector(".badge.updated");
+  if (badge) {
+    badge.textContent = "Updated just now";
+    badge.classList.add("just-now");
+  }
+}
+function onManualSaveSuccess(card, message) {
+  const key = (card && card.id ? card.id : "") + "|" + (card && card.lastUpdated ? card.lastUpdated : "");
+  const now = Date.now();
+  if (key === _lastManualSaveKey && now - _lastManualSaveAt < 1500) return; // dedupe
+  _lastManualSaveKey = key; _lastManualSaveAt = now;
+
+  showNotice(message || "Project updated", "ok");
+  if (card && card.id) {
+    const el = document.getElementById("card-" + CSS.escape(card.id));
+    if (el) {
+      el.classList.remove("save-flash");
+      void el.offsetWidth; // restart animation
+      el.classList.add("save-flash");
+      setTimeout(() => el.classList.remove("save-flash"), 1700);
+      showJustNowBadge(card);
+    }
+  }
+  const vol = soundVolume();
+  if (vol) playUpdateChime(vol);
+}
+
+/* Save button state: prevents duplicate submissions while a save is pending. */
+function setSaveUi(state) {
+  const drawer = document.getElementById("drawer");
+  if (!drawer) return;
+  const buttons = Array.from(drawer.querySelectorAll(".drawer-actions button"));
+  const saveBtn = document.getElementById("saveBtn");
+  const pending = state === "saving";
+  buttons.forEach(b => { if (b.id !== "cancelBtn") b.disabled = pending; });
+  if (saveBtn) {
+    if (state === "saving") { saveBtn.textContent = "Saving…"; saveBtn.disabled = true; }
+    else if (state === "saved") { saveBtn.textContent = "Saved"; }
+    else if (state === "failed") { saveBtn.textContent = "Save failed"; }
+    else { saveBtn.textContent = "Save Update"; saveBtn.disabled = false; }
+  }
+}
+
+function readThemePreference(key) {
+  try {
+    const value = localStorage.getItem(key);
+    return value === "light" || value === "dark" ? value : "";
+  } catch (_) {
+    return "";
+  }
+}
+function preferredSystemTheme() {
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+function activeMainTheme() {
+  const current = document.documentElement.dataset.theme;
+  return current === "dark" ? "dark" : "light";
+}
+function updateMainThemeControl(theme) {
+  const button = document.getElementById("themeToggle");
+  const label = document.getElementById("themeToggleLabel");
+  const icon = document.getElementById("themeToggleIcon");
+  if (!button || !label || !icon) return;
+  const dark = theme === "dark";
+  button.setAttribute("aria-pressed", dark ? "true" : "false");
+  button.setAttribute("aria-label", dark ? "Switch to day mode" : "Switch to night mode");
+  label.textContent = dark ? "Day mode" : "Night mode";
+  icon.textContent = String.fromCharCode(dark ? 9788 : 9790);
+}
+function applyPresentationTheme(theme, remember) {
+  theme = theme === "dark" ? "dark" : "light";
+  const overlay = document.getElementById("presentationOverlay");
+  const button = document.getElementById("presentationThemeToggle");
+  if (overlay) overlay.dataset.presentationTheme = theme;
+  if (button) {
+    const dark = theme === "dark";
+    button.textContent = dark ? "Day view" : "Night view";
+    button.setAttribute("aria-pressed", dark ? "true" : "false");
+    button.setAttribute("aria-label", dark ? "Switch presentation to day view" : "Switch presentation to night view");
+  }
+  if (remember) {
+    try { localStorage.setItem(PRESENTATION_THEME_STORAGE_KEY, theme); } catch (_) {}
+  }
+}
+function applyMainTheme(theme, remember) {
+  theme = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", theme === "dark" ? "#08131e" : "#005eb8");
+  updateMainThemeControl(theme);
+  if (remember) {
+    try { localStorage.setItem(THEME_STORAGE_KEY, theme); } catch (_) {}
+  }
+  if (!readThemePreference(PRESENTATION_THEME_STORAGE_KEY)) applyPresentationTheme(theme, false);
+}
+function initializeThemes() {
+  const savedMain = readThemePreference(THEME_STORAGE_KEY);
+  const main = savedMain || preferredSystemTheme();
+  applyMainTheme(main, false);
+  applyPresentationTheme(readThemePreference(PRESENTATION_THEME_STORAGE_KEY) || main, false);
+  if (window.matchMedia) {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const followSystem = function(event) {
+      if (!readThemePreference(THEME_STORAGE_KEY)) applyMainTheme(event.matches ? "dark" : "light", false);
+    };
+    if (media.addEventListener) media.addEventListener("change", followSystem);
+    else if (media.addListener) media.addListener(followSystem);
+  }
+}
 
 function displayText(s) {
   return String(s || "")
@@ -1789,7 +2751,7 @@ async function loadProjectFileIndex() {
   }
 }
 const ACTIVITY_FIELD_META = {
-  status: ["status_changed", "Status changed"], riskColour: ["risk_changed", "Risk changed"],
+  status: ["status_changed", "Status changed"], riskColour: ["risk_changed", "Project health changed"],
   projectLead: ["lead_changed", "Lead changed"], owner: ["lead_changed", "Owner changed"],
   reviewDate: ["review_date_changed", "Review date changed"], nextAction: ["next_action_changed", "Next action changed"],
   context: ["current_state_changed", "Current state changed"], notes: ["notes_updated", "Notes updated"]
@@ -1936,7 +2898,7 @@ function cardDetailsMarkup(card) {
   const risk = String(card.riskColour || "Not recorded");
   let html = '<section class="details-section"><h4>At a Glance</h4><div class="details-glance">' +
     '<div class="details-field"><span>Status</span><b>' + esc(STATUS_LABELS[normalizeStatus(card.status)] || card.status || "Not recorded") + '</b></div>' +
-    '<div class="details-field"><span>Risk</span><b>' + esc(risk.charAt(0).toUpperCase() + risk.slice(1)) + '</b></div>' +
+    '<div class="details-field"><span>Project health</span><b>' + esc(projectHealthLabel(risk)) + '</b></div>' +
     '<div class="details-field"><span>Lead</span><b>' + esc(lead) + '</b></div>' +
     '<div class="details-field"><span>Review date</span><b>' + esc(card.reviewDate || "Not recorded") + '</b></div>' +
     '<div class="details-field wide"><span>Last updated</span><b>' + esc(updated) + '</b></div>' +
@@ -2049,7 +3011,7 @@ function parseBulkProjects(text) {
     const errors = [], nameKey = entry.title.toLowerCase();
     if (!entry.title) errors.push("Project name is required.");
     if (!entry.status) errors.push("Status must be Backlog, In Progress, Blocked or Done.");
-    if (!["green","amber","red"].includes(entry.risk)) errors.push("Risk must be green, amber or red.");
+    if (!["green","amber","red"].includes(entry.risk)) errors.push("Project health must be On track, Needs attention or At risk.");
     if (entry.reviewDate && !/^\d{4}-\d{2}-\d{2}$/.test(entry.reviewDate)) errors.push("Review date must be YYYY-MM-DD.");
     if (nameKey && (existingNames.has(nameKey) || batchNames.has(nameKey))) errors.push("Duplicate project name.");
     if (nameKey) batchNames.add(nameKey);
@@ -2062,7 +3024,7 @@ function renderBulkPreview() {
   document.getElementById("saveBulkBtn").disabled = validCount === 0;
   document.getElementById("bulkProjectError").textContent = rows.length ? validCount + " valid row(s); " + (rows.length - validCount) + " invalid row(s)." : "Paste data to preview.";
   document.getElementById("bulkPreviewWrap").innerHTML = rows.length ? '<table class="bulk-preview"><thead><tr><th>Row</th><th>Project</th><th>Status</th><th>ID</th><th>Validation</th></tr></thead><tbody>' +
-    rows.map(r => '<tr class="' + (r.valid ? '' : 'invalid') + '"><td>' + r.rowNumber + '</td><td>' + esc(r.entry ? r.entry.title : '') + '</td><td>' + esc(r.entry ? STATUS_LABELS[r.entry.status] || '' : '') + '</td><td>' + esc(r.entry ? r.entry.id : '') + '</td><td>' + esc(r.errors.length ? r.errors.join(" ") : "Ready") + '</td></tr>').join("") + '</tbody></table>' : "";
+    rows.map(r => '<tr class="' + (r.valid ? '' : 'invalid') + '"><td>' + r.rowNumber + '</td><td>' + esc(r.entry ? r.entry.title : '') + '</td><td>' + esc(r.entry ? STATUS_LABELS[r.entry.status] || '' : '') + '</td><td>' + esc(r.entry ? r.entry.id : '') + '</td><td>' + esc(r.errors.length ? r.errors.join(" ") : "Valid") + '</td></tr>').join("") + '</tbody></table>' : "";
 }
 function newProjectCard(entry) {
   const stamp = nowStamp();
@@ -2512,11 +3474,32 @@ async function loadLatestProjectsFromServer(message) {
   renderReviewCurrent();
   if (message) showNotice(message, "ok");
 }
+/* Background / remote refresh: updates cards and counts silently.
+   No chime, no "Project updated", no local save highlight. Shows a quiet,
+   deduplicated notice only when actual shared changes are detected. */
+let _lastQuietRefreshRevision = "";
+async function refreshFromSharedSource(message) {
+  const status = await fetchSyncStatus();
+  const dataResp = await fetch("data/projects.json?ts=" + Date.now(), { cache: "no-store" });
+  if (!dataResp.ok) throw new Error("HTTP " + dataResp.status);
+  appState.payload = await dataResp.json();
+  rememberSyncStatus(status, message);
+  scheduleNextSync(SYNC_POLL_MS);
+  await loadAuditUpdates();
+  render(appState.payload.projects || [], appState.payload.meta || {});
+  renderReviewCurrent();
+  const rev = sourceProjectsRevision(status);
+  if (rev && rev !== _lastQuietRefreshRevision && rev !== appState.sync.projectsRevision) {
+    _lastQuietRefreshRevision = rev;
+    showNotice("Portfolio refreshed with shared updates", "ok");
+  }
+  appState.sync.projectsRevision = rev || appState.sync.projectsRevision;
+}
 async function applyPendingSync() {
   if (!appState.sync.pending) return;
   const pending = appState.sync.pending;
   appState.sync.pending = null;
-  await loadLatestProjectsFromServer(pending.message || "Updated from Team ESMI");
+  await refreshFromSharedSource(pending.message || "Updated from Team ESMI");
 }
 function resumeSyncAfterEditing(forceCheck) {
   if (isEditingActive()) return;
@@ -2552,7 +3535,7 @@ async function pollSyncStatus() {
         renderSyncIndicator();
         showNotice("New updates are available. Finish or cancel your edit to refresh.", "ok");
       } else {
-        await loadLatestProjectsFromServer("Updated from Team ESMI");
+        await refreshFromSharedSource("Updated from Team ESMI");
       }
     }
   } catch (err) {
@@ -2721,7 +3704,7 @@ function renderPresentationSetup() {
     '<label class="picker-row">' +
       '<input type="checkbox" data-present-pick="' + attr(t.id) + '"' + (isPresentationSelected(t.id) ? ' checked' : '') + '>' +
       '<div><div class="title">' + esc(t.title) + '</div><div class="meta">' + esc(STATUS_LABELS[t.status] || t.status) + ' · ' + esc(healthFor(t)) + '</div></div>' +
-      '<span class="badge risk-' + esc(t.riskColour) + '">' + esc(t.riskColour || "green") + '</span>' +
+      projectHealthBadge(t) +
     '</label>'
   ).join("");
   document.querySelectorAll("[data-present-select]").forEach(el => {
@@ -2757,7 +3740,7 @@ function renderPresentationCard(t) {
     '<div class="presentation-card-title">' + esc(t.title) + '</div>' +
     '<div class="presentation-kicker">' +
       '<span class="badge">' + esc(STATUS_LABELS[t.status] || t.status) + '</span>' +
-      '<span class="badge risk-' + esc(t.riskColour || "green") + '">Risk: ' + esc(t.riskColour || "green") + '</span>' +
+      projectHealthBadge(t) +
       (updatedAt ? '<span class="badge updated ' + updateBadgeClass(updatedAt) + '">' + esc(formatRelativeUpdateTime(updatedAt)) + '</span>' : '') +
     '</div>' +
     '<div class="presentation-card-grid">' +
@@ -2872,6 +3855,182 @@ function healthFor(t) {
 function healthClass(label) {
   return label === "Healthy" ? "healthy" : label === "Stale" ? "stale" : label === "Blocked" ? "blocked" : label === "Done" ? "done" : "needs";
 }
+/* Project Health rebrands the stored riskColour field (green/amber/red) without
+   changing the stored schema. Green -> On track, Amber -> Needs attention,
+   Red -> At risk, missing/unknown -> Not assessed. */
+const PROJECT_HEALTH = {
+  green: { label: "On track", tip: "On track: no current concerns recorded. Work is progressing as expected." },
+  amber: { label: "Needs attention", tip: "Needs attention: a concern is recorded and should be reviewed. See Current concern." },
+  red:   { label: "At risk", tip: "At risk: a significant blocker, risk or issue is recorded. See Current concern." }
+};
+function projectHealthLabel(colour) {
+  const key = String(colour || "").toLowerCase();
+  if (PROJECT_HEALTH[key]) return PROJECT_HEALTH[key].label;
+  return "Not assessed";
+}
+function projectHealthTip(colour) {
+  const key = String(colour || "").toLowerCase();
+  const base = PROJECT_HEALTH[key] ? PROJECT_HEALTH[key].tip : "Not assessed: no project health rating has been recorded yet.";
+  return base;
+}
+function projectHealthConcern(card) {
+  /* Only surface an explicit risk/issue/blocker/health note as the concern. */
+  const note = (card && (card.blockerReason || card.waitingOn || card.notes)) || "";
+  return note ? "Current concern: " + note : "";
+}
+function projectHealthBadge(card) {
+  const colour = card && card.riskColour ? card.riskColour : "";
+  const label = projectHealthLabel(colour);
+  const key = String(colour || "").toLowerCase();
+  const cls = key === "green" ? "health-ontrack" : key === "amber" ? "health-needs" : key === "red" ? "health-atrisk" : "health-notassessed";
+  const tip = projectHealthTip(colour) + (projectHealthConcern(card) ? "  " + projectHealthConcern(card) : "");
+  return '<span class="badge ' + cls + '" title="' + attr(tip) + '">' + esc(label) + '</span>';
+}
+
+/* Copy full project context for AI.
+   Builds a clean Markdown snapshot from existing card data only.
+   Never reads project files, never mutates data, never marks dirty,
+   never creates an activity entry, never plays the update chime. */
+function projectContextMarkdown(card) {
+  const lines = [];
+  lines.push("# SAMI Project Context", "");
+  const pushField = (label, value) => {
+    const v = (value === undefined || value === null) ? "" : String(value).trim();
+    lines.push("- " + label + ": " + (v || "Not recorded"));
+  };
+  lines.push("## Project");
+  pushField("Name", card.title);
+  pushField("Project ID", card.id);
+  pushField("Workflow status", STATUS_LABELS[card.status] || card.status);
+  pushField("Project health", projectHealthLabel(card.riskColour));
+  pushField("Project lead", leadFor(card));
+  pushField("Category", card.category);
+  pushField("Priority", card.priority);
+  pushField("Start date", card.startDate);
+  pushField("Target date", card.targetDate);
+  pushField("Review date", card.reviewDate);
+  pushField("Last updated", getCardUpdatedAt(card));
+  lines.push("", "## Current Position");
+  const summary = card.context || "";
+  const state = card.currentStatus || card.context || "";
+  const next = card.nextAction || card.next || "";
+  if (summary || state || next) {
+    if (summary) { lines.push("### Summary", summary, ""); }
+    if (state) { lines.push("### Current state", state, ""); }
+    if (next) { lines.push("### Next action", next, ""); }
+  }
+  lines.push("## Delivery Context");
+  const issues = card.issues || card.blockerReason || "";
+  const concerns = projectHealthConcern(card).replace(/^Current concern:\s*/, "");
+  const deps = card.dependencies || card.waitingOn || "";
+  const decisions = card.decisionsRequired || "";
+  const blockers = card.blockerReason || card.waitingOn || "";
+  if (issues || concerns || deps || decisions || blockers) {
+    if (issues) { lines.push("### Issues", issues, ""); }
+    if (concerns) { lines.push("### Project health concerns", concerns, ""); }
+    if (deps) { lines.push("### Dependencies", deps, ""); }
+    if (decisions) { lines.push("### Decisions required", decisions, ""); }
+    if (blockers) { lines.push("### Blockers", blockers, ""); }
+  }
+  if (card.notes) { lines.push("## Notes", card.notes, ""); }
+  const folder = folderMetadata(card);
+  if (folder || appState.projectFileIndex) {
+    lines.push("## Project Files");
+    pushField("Canonical project folder", folder ? (folder.canonicalPath || folder.path || "") : "");
+    const entry = projectFileEntry(card);
+    if (entry) {
+      pushField("Indexed file count", fileIndexCount(entry, "fileCount"));
+      const metaBits = [];
+      [["Admin", "adminCount"], ["Planning", "planningCount"], ["Delivery", "deliveryCount"],
+       ["Meetings", "meetingsCount"], ["Risks / Issues / Decisions", "risksIssuesDecisionsCount"],
+       ["Evidence", "evidenceCount"], ["Closeout", "closeoutCount"]].forEach(p => {
+        const n = fileIndexCount(entry, p[1]);
+        if (n) metaBits.push(p[0] + ": " + n);
+      });
+      if (metaBits.length) lines.push("- Existing file metadata: " + metaBits.join(", "));
+    }
+    lines.push("");
+  }
+  const recentActivity = activityItemsFor(card).slice(0, 5);
+  if (recentActivity.length) {
+    lines.push("## Recent Activity");
+    recentActivity.forEach(item => {
+      lines.push("- " + formatActivityStamp(item.timestamp, false) + " · " + item.summary + (item.actor ? " (" + item.actor + ")" : ""));
+    });
+    lines.push("");
+  }
+  const fullHistory = activityItemsFor(card);
+  if (fullHistory.length) {
+    lines.push("## Full Meaningful Update History");
+    fullHistory.forEach(item => {
+      const change = (item.details && item.details.oldValue && item.details.newValue)
+        ? " — " + safeActivityValue(item.details.oldValue) + " → " + safeActivityValue(item.details.newValue) : "";
+      lines.push("- " + formatActivityStamp(item.timestamp, false) + " · " + item.summary + change + (item.actor ? " (" + item.actor + ")" : ""));
+    });
+    lines.push("");
+  }
+  lines.push("## AI Assistance");
+  lines.push("Use this context to analyse the project position, identify gaps, recommend next actions, prepare a status update, or draft relevant project documentation.");
+  lines.push("");
+  return lines.join("\n");
+}
+async function onCopyProjectContext(id, button) {
+  const idx = cardById(id);
+  if (idx < 0) return;
+  const card = appState.projects[idx];
+  const text = projectContextMarkdown(card);
+  let copied = false;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    }
+  } catch (_) { copied = false; }
+  if (copied) {
+    showNotice("Project context copied", "ok");
+    if (button) {
+      const icon = button.querySelector(".copy-ctx-icon");
+      if (icon) {
+        const prev = icon.textContent;
+        icon.textContent = "✓";
+        button.setAttribute("aria-label", "Project context copied");
+        setTimeout(() => { icon.textContent = prev; button.setAttribute("aria-label", "Copy full project context for AI"); }, 2000);
+      }
+    }
+    return;
+  }
+  // Fallback: safe selectable modal with escaped text.
+  showCopyContextFallback(text);
+  showNotice("Could not copy project context", "error");
+}
+function showCopyContextFallback(text) {
+  let modal = document.getElementById("copyContextFallback");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.className = "copy-context-modal";
+    modal.id = "copyContextFallback";
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.setAttribute("aria-label", "Copy project context");
+    modal.innerHTML =
+      '<div class="copy-context-dialog">' +
+        '<h2>Copy project context</h2>' +
+        '<p class="subtle">Automatic copy was blocked. Select all text and copy it manually (Ctrl/Cmd+C).</p>' +
+        '<textarea id="copyContextText" readonly spellcheck="false"></textarea>' +
+        '<div class="drawer-actions">' +
+          '<button type="button" id="copyContextClose" class="primary">Done</button>' +
+        '</div>' +
+      '</div>';
+    modal.addEventListener("click", e => { if (e.target === modal) modal.remove(); });
+    document.body.appendChild(modal);
+    const closeBtn = document.getElementById("copyContextClose");
+    if (closeBtn) closeBtn.onclick = () => modal.remove();
+  }
+  const ta = document.getElementById("copyContextText");
+  if (ta) { ta.value = text; setTimeout(() => { ta.focus(); ta.select(); }, 0); }
+  modal.classList.add("open");
+}
+
 function activeForHealth(t) {
   return t.status !== "done";
 }
@@ -2961,12 +4120,12 @@ function renderCard(t) {
   const recentClass = hoursSince(updatedAt) !== null && hoursSince(updatedAt) < 24 ? " recent-strong" : (isRecentlyUpdated(updatedAt, 7) ? " recent-soft" : "");
   const detailsOpen = appState.detailsCardId === t.id;
   let html = '<div class="card s-' + esc(t.status) + recentClass + (t.highlight ? ' highlight' : '') + '" id="card-' + attr(t.id) + '" data-card-id="' + attr(t.id) + '">';
-  if (t.highlight) html += '<div class="highlight-tag">Focus Area</div>';
   html += '<div class="card-topline"><div class="title">' + esc(t.title) + '</div><div class="card-top-actions">' +
     '<button class="mini-btn details-btn" type="button" data-details="' + attr(t.id) + '" aria-expanded="' + (detailsOpen ? 'true' : 'false') + '" aria-controls="details-' + attr(t.id) + '">Details</button>' +
+    '<button class="mini-btn card-copy-ctx" type="button" data-copy-context="' + attr(t.id) + '" aria-label="Copy full project context for AI" title="Copy full project context for AI"><span class="copy-ctx-icon" aria-hidden="true">⧉</span></button>' +
     '<button class="mini-btn" data-edit="' + attr(t.id) + '" data-edit-required>Update</button></div></div>';
   html += '<span class="badge ' + healthClass(health) + '">' + esc(health) + '</span> ';
-  html += '<span class="badge risk-' + esc(t.riskColour) + '">Risk: ' + esc(t.riskColour) + '</span>';
+  html += projectHealthBadge(t);
   if (updatedAt) html += ' <span class="badge updated ' + updateBadgeClass(updatedAt) + '">' + esc(formatRelativeUpdateTime(updatedAt)) + '</span>';
   html += ' <span class="file-visibility" data-file-visibility-for="' + attr(t.id) + '">' + fileBadgeMarkup(t) + '</span>';
   if (t.blockerReason) html += '<div class="blocked-bar">⊘ ' + esc(t.blockerReason) + '</div>';
@@ -2997,11 +4156,11 @@ function renderCard(t) {
 
 function wipLimitFor(col) {
   const limits = appState.config.wipLimits || {};
-  return Number(limits[col.label] || (col.key === "backlog" ? limits.Ready : null) || 999);
+  return Number(limits[col.label] || 999);
 }
 function columnPolicyFor(col) {
   const policies = appState.config.columnPolicies || {};
-  return policies[col.label] || (col.key === "backlog" ? policies.Ready : "") || "";
+  return policies[col.label] || "";
 }
 function recentCards() {
   return appState.projects
@@ -3043,23 +4202,79 @@ function focusCard(id) {
   card.classList.add("recent-focus");
 }
 
-function render(projects, meta) {
+function normalizedSearchValue(value) {
+  if (value === null || value === undefined) return "";
+  if (Array.isArray(value)) value = value.join(" ");
+  else if (typeof value === "object") {
+    try { value = JSON.stringify(value); } catch (_) { value = ""; }
+  }
+  return displayText(String(value)).toLocaleLowerCase("en-AU");
+}
+function cardSearchText(card) {
+  return normalizedSearchValue([
+    card.title, card.id, leadFor(card), card.owner, card.projectLead, card.leadName,
+    card.status, STATUS_LABELS[card.status], card.context, card.next, card.nextAction,
+    card.blockerReason, card.blocked, card.waitingOn, card.notes, card.tags, card.people,
+    card.evidenceSource, card.completedOutcome, card.priority, card.riskColour,
+    card.reviewDate, card.lastUpdated, card.updatedBy
+  ]);
+}
+function cardMatchesSearch(card, query) {
+  const tokens = normalizedSearchValue(query).trim().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return true;
+  const haystack = cardSearchText(card);
+  return tokens.every(token => haystack.includes(token));
+}
+function updateSearchControls(visibleCount, totalCount) {
+  const input = document.getElementById("boardSearch");
+  const clear = document.getElementById("clearSearchBtn");
+  const count = document.getElementById("searchResultCount");
+  const active = normalizedSearchValue(appState.searchQuery).trim().length > 0;
+  if (input && input.value !== appState.searchQuery) input.value = appState.searchQuery;
+  if (clear) clear.hidden = !active;
+  if (count) count.textContent = active
+    ? (visibleCount ? visibleCount + " of " + totalCount + " cards" : "No matches")
+    : totalCount + " cards";
+  document.body.classList.toggle("search-active", active);
+}
+function setBoardSearchQuery(value) {
+  appState.searchQuery = String(value || "");
+  render(appState.projects, appState.meta, { skipAsyncRefresh:true });
+}
+function clearBoardSearch(focusInput) {
+  appState.searchQuery = "";
+  const input = document.getElementById("boardSearch");
+  if (input) input.value = "";
+  render(appState.projects, appState.meta, { skipAsyncRefresh:true });
+  if (focusInput && input) input.focus();
+}
+function render(projects, meta, options) {
   appState.projects = projects.map(normalizeCard);
   appState.meta = meta || {};
   projects = appState.projects;
+  const searchActive = normalizedSearchValue(appState.searchQuery).trim().length > 0;
+  const visibleProjects = projects.filter(t => cardMatchesSearch(t, appState.searchQuery));
   const board = document.getElementById('board');
   board.innerHTML = '';
 
   COLS.forEach(function(col) {
-    const items = projects.filter(function(t) { return t.status === col.key; });
+    const fullItems = projects.filter(function(t) { return t.status === col.key; });
+    const items = visibleProjects.filter(function(t) { return t.status === col.key; });
     const limit = wipLimitFor(col);
     const policy = columnPolicyFor(col);
-    const warning = items.length > limit ? '<span class="wip-warning">WIP ' + items.length + '/' + limit + '</span>' : "";
+    const warning = fullItems.length > limit ? '<span class="wip-warning">WIP ' + fullItems.length + '/' + limit + '</span>' : "";
+    const countLabel = searchActive ? items.length + " of " + fullItems.length : String(fullItems.length);
     let colHtml = '<div class="column">';
     colHtml += '<div class="col-header ' + col.cls + '" title="' + attr(policy) + '">' + col.icon + ' ' + col.label +
-               warning + ' <span class="count">' + items.length + '</span></div>';
+               warning + ' <span class="count">' + countLabel + '</span></div>';
     if (items.length === 0) {
-      colHtml += '<div class="empty-col">No items</div>';
+      const laneEmpty = {
+        backlog: 'No projects are waiting in the backlog',
+        running: 'No projects are currently in progress',
+        blocked: 'No projects are currently blocked',
+        done: 'No completed projects to display'
+      };
+      colHtml += '<div class="empty-col" data-lane-empty="' + attr(col.key) + '">' + (searchActive ? 'No matching cards' : (laneEmpty[col.key] || 'No items')) + '</div>';
     } else {
       items.forEach(function(t) { colHtml += renderCard(t); });
     }
@@ -3074,7 +4289,7 @@ function render(projects, meta) {
   const due = groupHealth()["Overdue review date"].length;
   document.getElementById('stats').innerHTML =
     '<div class="stat"><b>' + projects.length + '</b> Total</div>' +
-    '<div class="stat" style="color:var(--ready)"><b>' + counts.backlog + '</b> Backlog</div>' +
+    '<div class="stat" style="color:var(--status-backlog)"><b>' + counts.backlog + '</b> Backlog</div>' +
     '<div class="stat" style="color:var(--running)"><b>' + counts.running + '</b> In Progress</div>' +
     '<div class="stat" style="color:var(--blocked)"><b>' + counts.blocked + '</b> Blocked</div>' +
     '<div class="stat" style="color:var(--done)"><b>' + counts.done + '</b> Done</div>' +
@@ -3084,8 +4299,9 @@ function render(projects, meta) {
 
   renderHealthPanel();
   renderRecentlyUpdatedStrip();
+  updateSearchControls(visibleProjects.length, projects.length);
   updateEditState();
-  refreshFolderStatuses().catch(() => {});
+  if (!(options && options.skipAsyncRefresh)) refreshFolderStatuses().catch(() => {});
   if (isPresentationOpen()) renderPresentationBoard();
   if (document.getElementById("presentationPanel").classList.contains("open")) renderPresentationSetup();
 }
@@ -3198,6 +4414,8 @@ async function persistCard(action, note, mutate) {
   clearNotice();
   if (!requireUnlocked()) return;
   if (appState.editingIndex < 0) return;
+  if (appState.saving) return; // prevent duplicate submissions
+  setSaveUi("saving");
   if (!(await ensureFreshBeforeSave())) return;
   const card = appState.projects[appState.editingIndex];
   const before = fieldSnapshot(card);
@@ -3228,9 +4446,14 @@ async function persistCard(action, note, mutate) {
     await postJson("api/projects", appState.payload);
     if (appState.reviewStats) countReviewAction(action);
     closeDrawer();
-    await loadLatestProjectsFromServer("Saved and synced");
+    setSaveUi("saved");
+    setTimeout(() => setSaveUi("idle"), 1600);
+    await loadLatestProjectsFromServer(null);
     renderReviewCurrent();
+    onManualSaveSuccess(card, "Project updated");
   } catch (err) {
+    setSaveUi("failed");
+    setTimeout(() => setSaveUi("idle"), 2400);
     showNotice("Save failed. Audit/data not updated: " + err.message, "error");
   }
 }
@@ -3274,8 +4497,11 @@ async function persistLeadChange(id, value) {
     rememberAuditUpdate(event);
     appState.payload.projects = appState.projects;
     await postJson("api/projects", appState.payload);
-    await loadLatestProjectsFromServer("Saved and synced");
+    setSaveUi("saved");
+    setTimeout(() => setSaveUi("idle"), 1600);
+    await loadLatestProjectsFromServer(null);
     renderReviewCurrent();
+    onManualSaveSuccess(card, "Project updated");
   } catch (err) {
     showNotice("Save failed. Audit/data not updated: " + err.message, "error");
     if (originalProjectLead === undefined) delete card.projectLead;
@@ -3373,7 +4599,40 @@ async function reviewQuick(action) {
   if (action === "done") await persistCard("mark_done", "Marked done in review mode", c => { c.status = "done"; c.completedDate = c.completedDate || todayDate(); c.completedOutcome = c.completedOutcome || "Completed during review"; });
   advanceReview();
 }
+async function meetingPackRevision() {
+  const response = await fetch("data/projects.json?meetingPack=" + Date.now(), { cache:"no-store" });
+  if (!response.ok) throw new Error("Could not load the current board revision.");
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2,"0")).join("");
+}
+function meetingPackOrderedProjects() { return appState.projects.slice(); }
+function openMeetingPack() { document.getElementById("meetingPackStatus").textContent=""; document.getElementById("meetingPackModal").classList.add("open"); }
+function closeMeetingPack() { document.getElementById("meetingPackModal").classList.remove("open"); }
+async function generateMeetingPack(mode) {
+  const status=document.getElementById("meetingPackStatus");const format=document.getElementById("meetingPackFormat").value;const scope="Entire portfolio";const chosen=meetingPackOrderedProjects();
+  if (!chosen.length) { status.textContent="There are no cards to export."; return; }
+
+  status.textContent="Generating Meeting Pack...";
+  try { const revision=await meetingPackRevision();const response=await fetch("api/meeting-pack/export",{method:"POST",headers:{"Content-Type":"application/json; charset=utf-8"},body:JSON.stringify({format,mode,scope,projectIds:chosen.map(p=>p.id),revision})});if(!response.ok){let message="HTTP "+response.status;try{const e=await response.json();message=e.error||message;}catch(_){}throw new Error(message)}const blob=await response.blob();const disposition=response.headers.get("Content-Disposition")||"";const match=/filename="?([^";]+)"?/i.exec(disposition);const name=match?match[1]:"SAMI_Meeting_Pack."+format;const link=document.createElement("a");link.href=URL.createObjectURL(blob);link.download=name;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(link.href),1000);status.textContent="Meeting Pack generated."; }
+  catch(err){status.textContent="Generation failed: "+err.message;}
+
+}
 function bindEvents() {
+  document.getElementById("themeToggle").onclick = () => {
+    applyMainTheme(activeMainTheme() === "dark" ? "light" : "dark", true);
+  };
+  document.getElementById("presentationThemeToggle").onclick = () => {
+    const overlay = document.getElementById("presentationOverlay");
+    const current = overlay.dataset.presentationTheme === "dark" ? "dark" : "light";
+    applyPresentationTheme(current === "dark" ? "light" : "dark", true);
+  };
+  document.getElementById("boardSearch").addEventListener("input", e => setBoardSearchQuery(e.target.value));
+  document.getElementById("meetingPackBtn").onclick = openMeetingPack;
+  document.getElementById("meetingPackCancel").onclick = closeMeetingPack;
+  document.getElementById("meetingPackAuthorised").onclick = () => generateMeetingPack("authorised");
+  document.getElementById("meetingPackModal").onclick = e => { if(e.target.id === "meetingPackModal") closeMeetingPack(); };
+  document.getElementById("clearSearchBtn").onclick = () => clearBoardSearch(true);
   document.body.addEventListener("click", function(e) {
     if (e.target.closest("#splash")) {
       if (splashCanDismiss) hideSplash();
@@ -3428,6 +4687,11 @@ function bindEvents() {
       const idx = cardById(editId);
       if (idx >= 0) openDrawer(idx);
     }
+    const copyId = e.target.closest("[data-copy-context]");
+    if (copyId) {
+      onCopyProjectContext(copyId.getAttribute("data-copy-context"), copyId);
+      return;
+    }
     const action = e.target.getAttribute("data-review-action");
     if (action === "skip") return advanceReview();
     if (action === "update") {
@@ -3473,9 +4737,21 @@ function bindEvents() {
   document.addEventListener("keydown", function(e) {
     const overlayOpen = document.getElementById("presentationOverlay").classList.contains("open");
     if (!overlayOpen) {
+      const target = e.target;
+      const typing = target && (target.matches("input, textarea, select") || target.isContentEditable);
+      if (e.key === "/" && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        const search = document.getElementById("boardSearch");
+        search.focus();
+        search.select();
+        return;
+      }
       if (e.key === "Escape" && projectModalOpen()) {
         e.preventDefault();
         closeProjectModal();
+      } else if (e.key === "Escape" && appState.searchQuery) {
+        e.preventDefault();
+        clearBoardSearch(true);
       } else if (e.key === "Escape" && splashCanDismiss) hideSplash();
       return;
     }
@@ -3509,6 +4785,19 @@ function bindEvents() {
   document.getElementById("blockedBtn").onclick = () => persistCard("mark_blocked", "Marked blocked", c => { readFormInto(c); c.status = "blocked"; c.riskColour = "red"; c.blockerReason = c.blockerReason || "Needs blocker reason"; c.blocked = c.blockerReason; });
   document.getElementById("waitingBtn").onclick = () => persistCard("mark_waiting", "Marked waiting", c => { readFormInto(c); c.status = "blocked"; c.waitingOn = c.waitingOn || "TBA"; c.blockerReason = c.blockerReason || "Waiting on " + c.waitingOn; c.blocked = c.blockerReason; });
   document.getElementById("doneBtn").onclick = () => persistCard("mark_done", "Marked done", c => { readFormInto(c); c.status = "done"; c.completedDate = c.completedDate || todayDate(); c.completedOutcome = c.completedOutcome || "Completed"; });
+  const soundPref = document.getElementById("updateSoundPref");
+  if (soundPref) {
+    soundPref.value = getSoundPref();
+    soundPref.onchange = () => setSoundPref(soundPref.value);
+  }
+  const playTest = document.getElementById("playTestSoundBtn");
+  if (playTest) {
+    playTest.onclick = () => {
+      const vol = soundVolume();
+      if (!vol) { showNotice("Update sounds are Off", "ok"); return; }
+      playUpdateChime(vol);
+    };
+  }
   document.getElementById("addProjectBtn").onclick = openProjectModal;
   document.getElementById("closeProjectModalBtn").onclick = closeProjectModal;
   document.getElementById("cancelNewProjectBtn").onclick = closeProjectModal;
@@ -3613,6 +4902,7 @@ function bindEvents() {
 
 async function boot() {
   try {
+    initializeThemes();
     bindEvents();
     startSyncCountdown();
     loadProjectFileIndex();

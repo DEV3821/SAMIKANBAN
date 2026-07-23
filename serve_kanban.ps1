@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$RootPath,
   [string]$Root,
   [string]$SourceRoot,
@@ -59,6 +59,54 @@ function Write-ExceptionLog {
     if ($Exception.InnerException.StackTrace) {
       Write-ServerLog "$Prefix inner stack: $($Exception.InnerException.StackTrace)"
     }
+  }
+}
+
+function Repair-UserShortcutIcons {
+  param(
+    [string]$AppRoot,
+    [string[]]$ShortcutPaths
+  )
+
+  try {
+    $iconPath = Join-Path $AppRoot "assets\sami_project_portfolio_v2.ico"
+    if (-not (Test-Path -LiteralPath $iconPath -PathType Leaf)) {
+      Write-ServerLog "Shortcut icon repair skipped; versioned icon is missing: $iconPath"
+      return
+    }
+
+    if (-not $ShortcutPaths) {
+      $desktopRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
+      if ([string]::IsNullOrWhiteSpace($desktopRoot)) { $desktopRoot = Join-Path $env:USERPROFILE "Desktop" }
+      $programsRoot = [Environment]::GetFolderPath("Programs")
+      $ShortcutPaths = @(
+        (Join-Path $desktopRoot "SAMI Project Portfolio.lnk"),
+        (Join-Path $programsRoot "SAMI Project Portfolio.lnk")
+      )
+    }
+    $desiredIcon = "$iconPath,0"
+    $shell = New-Object -ComObject WScript.Shell
+    try {
+      foreach ($shortcutPath in $ShortcutPaths) {
+        if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) { continue }
+        try {
+          $shortcut = $shell.CreateShortcut($shortcutPath)
+          if (-not ([string]$shortcut.IconLocation).Equals($desiredIcon, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $shortcut.IconLocation = $desiredIcon
+            $shortcut.Save()
+            Write-ServerLog "Shortcut icon repaired: $shortcutPath -> $desiredIcon"
+          } else {
+            Write-ServerLog "Shortcut icon already current: $shortcutPath"
+          }
+        } catch {
+          Write-ServerLog "WARNING: shortcut icon repair failed for ${shortcutPath}: $($_.Exception.Message)"
+        }
+      }
+    } finally {
+      if ($shell) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
+    }
+  } catch {
+    Write-ServerLog "WARNING: shortcut icon repair was skipped: $($_.Exception.Message)"
   }
 }
 
@@ -613,7 +661,7 @@ function Test-FileWritableWithoutChange {
 
 function Test-DirectoryWritableFromAcl {
   param([string]$Path)
-  if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $false }
+  if (-not (Test-CanonicalContainerSafe -Path $Path)) { return $false }
   try {
     $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
     $sids = New-Object 'System.Collections.Generic.HashSet[string]'
@@ -651,7 +699,7 @@ function Update-TeamReachability {
   $script:TeamReachable = (Test-ReachableDirectory -Path $script:CanonicalRoot) -and
     (Test-Path -LiteralPath $script:CanonicalProjectsPath -PathType Leaf) -and
     (Test-Path -LiteralPath $script:CanonicalAuditPath -PathType Leaf) -and
-    (Test-Path -LiteralPath $script:CanonicalProjectFilesRoot -PathType Container)
+    (Test-CanonicalContainerSafe -Path $script:CanonicalProjectFilesRoot)
   if ($script:TeamReachable) { $script:EffectiveMode = 'team-canonical' }
   elseif ($script:ConfiguredMode -eq 'local-fallback') { $script:EffectiveMode = 'local-fallback' }
   else { $script:EffectiveMode = 'offline' }
@@ -691,7 +739,7 @@ function Get-SyncStatus {
   $audit = Get-CanonicalFileStatus -Path $script:CanonicalAuditPath
   $runtimeProjects = Get-FileRevisionInfo -Path $script:RuntimeProjectsPath
   $runtimeAudit = Get-FileRevisionInfo -Path $script:RuntimeAuditPath
-  $projectFilesExists = Test-Path -LiteralPath $script:CanonicalProjectFilesRoot -PathType Container
+  $projectFilesExists = Test-CanonicalContainerSafe -Path $script:CanonicalProjectFilesRoot
   return @{
     ok = $true
     mode = $script:EffectiveMode
@@ -931,6 +979,21 @@ function Test-ReachableDirectory {
   try { return -not [string]::IsNullOrWhiteSpace($Path) -and (Test-Path -LiteralPath $Path -PathType Container) } catch { return $false }
 }
 
+# Exception-safe container probe for canonical UNC paths. When the Team ESMI host
+# is offline, Test-Path -LiteralPath -PathType Container THROWS System.IO.IOException
+# instead of returning $false (under $ErrorActionPreference='Stop'). This wrapper
+# guarantees a boolean so an unavailable shared root never aborts the server.
+function Test-CanonicalContainerSafe {
+  param([string]$Path)
+  try {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    return [bool](Test-Path -LiteralPath $Path -PathType Container)
+  } catch {
+    Write-ServerLog "Canonical container probe suppressed exception (unavailable shared root): $Path -> $($_.Exception.GetType().FullName): $($_.Exception.Message)"
+    return $false
+  }
+}
+
 function Get-ProjectFolderLocation {
   param([string]$RelativePath)
   $relativeWindows = $RelativePath.Replace("/", [System.IO.Path]::DirectorySeparatorChar)
@@ -1077,6 +1140,12 @@ function Send-Response {
   }
 }
 
+function Send-DownloadResponse {
+  param([System.Net.Sockets.NetworkStream]$Stream,[byte[]]$Body,[string]$ContentType,[string]$FileName)
+  $safeName = ($FileName -replace '[^A-Za-z0-9_.-]', '_')
+  $headers = @("HTTP/1.1 200 OK","Content-Length: $($Body.Length)","Content-Type: $ContentType","Content-Disposition: attachment; filename=`"$safeName`"","Cache-Control: no-store","X-Content-Type-Options: nosniff","Connection: close","","") -join "`r`n"
+  $headerBytes=[Text.Encoding]::ASCII.GetBytes($headers);$Stream.Write($headerBytes,0,$headerBytes.Length);$Stream.Write($Body,0,$Body.Length)
+}
 function Assert-ReadableFile {
   param([string]$Path, [string]$Label)
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -1092,6 +1161,9 @@ function Assert-ReadableFile {
 }
 
 $listener = $null
+
+. (Join-Path $PSScriptRoot 'meeting_pack.ps1')
+$script:MeetingPackModuleHash = try { (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $PSScriptRoot 'meeting_pack.ps1')).Hash.ToLowerInvariant() } catch { 'unknown' }
 
 try {
   Write-ServerLog "=================================================="
@@ -1186,7 +1258,8 @@ try {
   Write-ServerLog "runtime data/projects.json readable: $jsonPath"
   Write-ServerLog "canonical data/projects.json readable=$([bool](Test-Path -LiteralPath $teamJsonPath -PathType Leaf)) writable=$(Test-FileWritableWithoutChange $teamJsonPath): $teamJsonPath"
   Write-ServerLog "canonical data/card_updates.jsonl readable=$([bool](Test-Path -LiteralPath $teamAuditPath -PathType Leaf)) writable=$(Test-FileWritableWithoutChange $teamAuditPath): $teamAuditPath"
-  Write-ServerLog "canonical project_files readable=$([bool](Test-Path -LiteralPath $script:CanonicalProjectFilesRoot -PathType Container)) writable=$(Test-DirectoryWritableFromAcl $script:CanonicalProjectFilesRoot): $($script:CanonicalProjectFilesRoot)"
+  Write-ServerLog "canonical project_files readable=$(Test-CanonicalContainerSafe -Path $script:CanonicalProjectFilesRoot) writable=$(Test-DirectoryWritableFromAcl $script:CanonicalProjectFilesRoot): $($script:CanonicalProjectFilesRoot)"
+  Repair-UserShortcutIcons -AppRoot $Root
 
   $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Parse("127.0.0.1"), $Port)
   Write-ServerLog "Attempting to bind TcpListener to 127.0.0.1:$Port"
@@ -1265,6 +1338,13 @@ try {
             Write-ServerLog "200 POST $rawPath"
             continue
           }
+          if ($pathOnly -eq "/api/meeting-pack/export") {
+            [void](Update-TeamReachability)
+            $export=Invoke-MeetingPackExport -Body $requestBody -CanonicalPath $teamJsonPath -SnapshotPath $jsonPath -CanonicalRoot $script:CanonicalRoot -TeamReachable ([bool]$script:TeamReachable)
+            Send-DownloadResponse -Stream $stream -Body $export.Bytes -ContentType $export.ContentType -FileName $export.FileName
+            Write-ServerLog "200 POST $rawPath Meeting Pack generated"
+            continue
+          }
           $body = [System.Text.Encoding]::UTF8.GetBytes("Not found")
           Send-Response -Stream $stream -StatusCode 404 -StatusText "Not Found" -Body $body
           Write-ServerLog "404 $method $rawPath"
@@ -1297,6 +1377,7 @@ try {
           startedAt = $script:StartedAt
           appVersion = Get-AppVersion -WebRoot $Root
           serverScriptHash = $script:ServerScriptHash
+          meetingPackModuleHash = $script:MeetingPackModuleHash
           mode = $script:EffectiveMode
           canonicalRoot = $script:CanonicalRoot
           runtimeRoot = $Root
