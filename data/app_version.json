@@ -1,6 +1,6 @@
 {
-    "version":  "2026.08.03.144147",
-    "releasedAt":  "2026-08-03T14:41:47.8034682+09:30",
-    "message":  "Server-managed Project Update History, exact Notes preservation, linked project-folder file detection, safe baseline migration, and Meeting Pack history context",
+    "version":  "2026.08.03.175232",
+    "releasedAt":  "2026-08-03T17:52:32.3564043+09:30",
+    "message":  "Fixed healthy Team ESMI sync status reporting and PDF Meeting Pack generation",
     "requiresReload":  true
 }

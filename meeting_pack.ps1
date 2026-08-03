@@ -71,21 +71,23 @@ function Get-MeetingPackProjects([string]$Path,[string[]]$Ids) {
   } else { $all }
   $result = New-Object System.Collections.Generic.List[object]
   foreach ($p in $chosen) {
-    $nextAction = if (-not [string]::IsNullOrWhiteSpace([string]$p.nextAction)) { [string]$p.nextAction } elseif (-not [string]::IsNullOrWhiteSpace([string]$p.next)) { [string]$p.next } else { 'No next action recorded' }
+    $nextActionValue = Get-MeetingPackProperty $p 'nextAction'
+    $legacyNextActionValue = Get-MeetingPackProperty $p 'next'
+    $nextAction = if (-not [string]::IsNullOrWhiteSpace([string]$nextActionValue)) { [string]$nextActionValue } elseif (-not [string]::IsNullOrWhiteSpace([string]$legacyNextActionValue)) { [string]$legacyNextActionValue } else { 'No next action recorded' }
     $historyValue=Get-MeetingPackProperty $p 'projectHistory'
     $historyRaw = @(if ($historyValue -is [Array]) { @($historyValue) } elseif ($historyValue) { @($historyValue) } else { })
     [void]$result.Add([pscustomobject]@{
-      id = [string]$p.id
-      name = [string]$p.title
+      id = [string](Get-MeetingPackProperty $p 'id')
+      name = [string](Get-MeetingPackProperty $p 'title')
       nextAction = $nextAction
-      status = Get-MeetingPackStatus ([string]$p.status)
-      health = [string]$p.riskColour
-      owner = [string]$p.owner
+      status = Get-MeetingPackStatus ([string](Get-MeetingPackProperty $p 'status'))
+      health = [string](Get-MeetingPackProperty $p 'riskColour')
+      owner = [string](Get-MeetingPackProperty $p 'owner')
       lead = Get-MeetingPackLead $p
-      reviewDate = [string]$p.reviewDate
-      blocker = [string]$p.blockerReason
-      update = if (-not [string]::IsNullOrWhiteSpace([string]$p.context)) { [string]$p.context } else { 'No update recorded' }
-      notes = [string]$p.notes
+      reviewDate = [string](Get-MeetingPackProperty $p 'reviewDate')
+      blocker = [string](Get-MeetingPackProperty $p 'blockerReason')
+      update = if (-not [string]::IsNullOrWhiteSpace([string](Get-MeetingPackProperty $p 'context'))) { [string](Get-MeetingPackProperty $p 'context') } else { 'No update recorded' }
+      notes = [string](Get-MeetingPackProperty $p 'notes')
       history = @(Get-MeetingPackHistoryLines $p 5)
       historyCount = $historyRaw.Count
     })
@@ -120,7 +122,31 @@ function New-MeetingPackXlsx($m,$projects) {
 }
 
 function New-MeetingPackPdf($m,$projects) {
-  $blocks=foreach($p in $projects){$history=if($p.history.Count){'<ul>'+($p.history|ForEach-Object{'<li>'+(ConvertTo-MeetingPackXml $_)+'</li>'}-join'')+'</ul>'}else{'<p>No automatic project updates have been recorded yet.</p>'};'<section><h2>'+(ConvertTo-MeetingPackXml $p.name)+'</h2><div class="next"><b>Next Action</b><p>'+(ConvertTo-MeetingPackXml $p.nextAction)+'</p></div><b>Status:</b> '+(ConvertTo-MeetingPackXml $p.status)+'<br><b>Health:</b> '+(ConvertTo-MeetingPackXml $p.health)+'<br><b>Owner:</b> '+(ConvertTo-MeetingPackXml $p.owner)+'<br><b>Project Lead:</b> '+(ConvertTo-MeetingPackXml $p.lead)+'<br><b>Review Date:</b> '+(ConvertTo-MeetingPackXml $p.reviewDate)+'<br><b>Blocker:</b> '+(ConvertTo-MeetingPackXml $p.blocker)+'<h3>Latest Update</h3><p>'+ (ConvertTo-MeetingPackXml $p.update) +'</p><h3>Project Update History</h3>'+$history+'<h3>Additional Notes</h3><p>'+ (ConvertTo-MeetingPackXml $(if($p.notes){$p.notes}else{'No additional notes recorded.'})) +'</p></section>'};$wm=if($m.classification-eq'Preview'){'<div class="wm">PREVIEW</div>'}else{''};$iconPath=Join-Path $PSScriptRoot 'assets\sami_project_portfolio.ico';$iconData=if(Test-Path -LiteralPath $iconPath){'data:image/x-icon;base64,'+[Convert]::ToBase64String([IO.File]::ReadAllBytes($iconPath))}else{''};$html='<!doctype html><meta charset="utf-8"><style>@page{size:A4;margin:16mm}body{font:11pt Arial;color:#173640}header{border-bottom:4px solid #007f82;padding:10px}.mark{width:52px;height:52px;vertical-align:middle;object-fit:contain}h1{display:inline;margin-left:15px;color:#006b70}section{break-inside:avoid;border-left:5px solid #007f82;padding:10px;margin:15px 0;background:#f3f9f8}.next{background:#d9efed;padding:8px;font-size:12pt}.wm{position:fixed;top:42%;left:12%;font-size:70pt;transform:rotate(-30deg);color:rgba(0,127,130,.13);z-index:-1}</style><header><img class="mark" src="'+$iconData+'" alt="SAMI"><h1>Meeting Pack</h1></header><p><b>'+$m.classification+'</b> · '+$m.time+' · '+(ConvertTo-MeetingPackXml $m.scope)+' · Revision '+$m.revision.Substring(0,12)+'<br>Prepared from: SAMI Kanban</p>'+$wm+($blocks-join'');$dir=Join-Path([IO.Path]::GetTempPath())('sami-mp-'+[guid]::NewGuid().ToString('n'));[IO.Directory]::CreateDirectory($dir)|Out-Null;$hp=Join-Path $dir pack.html;$pp=Join-Path $dir pack.pdf;[IO.File]::WriteAllText($hp,$html,[Text.UTF8Encoding]::new($false));$edge=@("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe","$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe")|Where-Object{Test-Path $_}|Select-Object -First 1;if(-not$edge){throw 'Installed Edge PDF engine is unavailable.'};$p=Start-Process $edge -ArgumentList @('--headless','--disable-gpu',"--print-to-pdf=$pp",('file:///'+$hp.Replace('\','/'))) -Wait -PassThru -WindowStyle Hidden;if($p.ExitCode-ne0-or-not(Test-Path $pp)){throw 'PDF generation failed.'};try{[IO.File]::ReadAllBytes($pp)}finally{Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue}
+  $blocks = foreach ($p in $projects) {
+    $history = if (@($p.history).Count) {
+      $historyItems = @($p.history | ForEach-Object {
+        '<li>' + (ConvertTo-MeetingPackXml $_) + '</li>'
+      })
+      '<ul>' + ($historyItems -join '') + '</ul>'
+    } else {
+      '<p>No automatic project updates have been recorded yet.</p>'
+    }
+    '<section><h2>' + (ConvertTo-MeetingPackXml $p.name) + '</h2><div class="next"><b>Next Action</b><p>' + (ConvertTo-MeetingPackXml $p.nextAction) + '</p></div><b>Status:</b> ' + (ConvertTo-MeetingPackXml $p.status) + '<br><b>Health:</b> ' + (ConvertTo-MeetingPackXml $p.health) + '<br><b>Owner:</b> ' + (ConvertTo-MeetingPackXml $p.owner) + '<br><b>Project Lead:</b> ' + (ConvertTo-MeetingPackXml $p.lead) + '<br><b>Review Date:</b> ' + (ConvertTo-MeetingPackXml $p.reviewDate) + '<br><b>Blocker:</b> ' + (ConvertTo-MeetingPackXml $p.blocker) + '<h3>Latest Update</h3><p>' + (ConvertTo-MeetingPackXml $p.update) + '</p><h3>Project Update History</h3>' + $history + '<h3>Additional Notes</h3><p>' + (ConvertTo-MeetingPackXml $(if ($p.notes) { $p.notes } else { 'No additional notes recorded.' })) + '</p></section>'
+  }
+  $wm = if ($m.classification -eq 'Preview') { '<div class="wm">PREVIEW</div>' } else { '' }
+  $iconPath = Join-Path $PSScriptRoot 'assets\sami_project_portfolio.ico'
+  $iconData = if (Test-Path -LiteralPath $iconPath) { 'data:image/x-icon;base64,' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($iconPath)) } else { '' }
+  $html = '<!doctype html><meta charset="utf-8"><style>@page{size:A4;margin:16mm}body{font:11pt Arial;color:#173640}header{border-bottom:4px solid #007f82;padding:10px}.mark{width:52px;height:52px;vertical-align:middle;object-fit:contain}h1{display:inline;margin-left:15px;color:#006b70}section{break-inside:avoid;border-left:5px solid #007f82;padding:10px;margin:15px 0;background:#f3f9f8}.next{background:#d9efed;padding:8px;font-size:12pt}.wm{position:fixed;top:42%;left:12%;font-size:70pt;transform:rotate(-30deg);color:rgba(0,127,130,.13);z-index:-1}</style><header><img class="mark" src="' + $iconData + '" alt="SAMI"><h1>Meeting Pack</h1></header><p><b>' + $m.classification + '</b> · ' + $m.time + ' · ' + (ConvertTo-MeetingPackXml $m.scope) + ' · Revision ' + $m.revision.Substring(0, 12) + '<br>Prepared from: SAMI Kanban</p>' + $wm + (@($blocks) -join '')
+  $dir = Join-Path ([IO.Path]::GetTempPath()) ('sami-mp-' + [guid]::NewGuid().ToString('n'))
+  [IO.Directory]::CreateDirectory($dir) | Out-Null
+  $hp = Join-Path $dir 'pack.html'
+  $pp = Join-Path $dir 'pack.pdf'
+  [IO.File]::WriteAllText($hp, $html, [Text.UTF8Encoding]::new($false))
+  $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+  if (-not $edge) { throw 'Installed Edge PDF engine is unavailable.' }
+  $process = Start-Process $edge -ArgumentList @('--headless', '--disable-gpu', "--print-to-pdf=$pp", ('file:///' + $hp.Replace('\', '/'))) -Wait -PassThru -WindowStyle Hidden
+  if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $pp -PathType Leaf)) { throw 'PDF generation failed.' }
+  try { [IO.File]::ReadAllBytes($pp) } finally { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
 function Invoke-MeetingPackExport([string]$Body,[string]$CanonicalPath,[string]$SnapshotPath,[string]$CanonicalRoot,[bool]$TeamReachable) {

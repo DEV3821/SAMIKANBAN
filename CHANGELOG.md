@@ -1,5 +1,11 @@
 # SAMI Kanban WorkServer Change Log
 
+## 2026-08-03 — 2026.08.03.175232
+
+- Fixed the sync indicator incorrectly reporting failure while Team ESMI synchronisation was healthy.
+- Fixed PDF Meeting Pack generation through the HTTP export route.
+- No reinstall is required after the update is later deployed through Team ESMI.
+
 ## 2026-08-03 — 2026.08.03.144147
 
 - Added server-managed Project Update History for Next Action set, changed, cleared, and baseline events with server timestamps, reliable actors only, deterministic snapshots, stale-revision protection, atomic project/audit writes, and idempotent retries.

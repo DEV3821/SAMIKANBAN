@@ -2567,7 +2567,7 @@ let appState = {
   appVersion: { loadedVersion: "", status: null, timer: null, checking: false },
   sync: {
     projectsRevision: "", projectsSignature: "", auditRevision: "", auditSignature: "", pending: null, timer: null, countdownTimer: null, lastStatus: null, lastState: null, stateInitialized: false, lastError: "", lastSuccessMessage: "",
-    lastSyncStartedAt: null, lastSyncSucceededAt: null, lastSyncFailedAt: null, nextSyncDueAt: null,
+    lastSyncStartedAt: null, lastSyncSucceededAt: null, lastSyncFailedAt: null, nextSyncDueAt: null, lastNormalised: null,
     isEditing: false, teamReachable: null, syncInFlight: false, ownBoardOrderChangeId: "", ownProjectsSignature: "", lastChangeId: "",
     projectFileIndexSignature: "", projectFileIndexRevision: 0
   }
@@ -4138,6 +4138,9 @@ function installBoardOrderTestHooks() {
     getVisualOrder: () => JSON.parse(JSON.stringify(domBoardOrder())),
     getRevisions: () => ({ projectsRevision: appState.sync.projectsRevision, boardOrderRevision: appState.boardOrder.revision, lastChangeId: appState.sync.lastChangeId || appState.boardOrder.changeId || "" }),
     getSyncState: () => JSON.parse(JSON.stringify({ teamReachable: appState.sync.teamReachable, lastState: appState.sync.lastState, pending: appState.sync.pending })),
+    getNormalisedSyncState: response => JSON.parse(JSON.stringify(normaliseSyncState(response))),
+    getSyncIndicatorState: () => { const root = document.getElementById("syncIndicator"), label = document.getElementById("syncLabel"); return { className: root ? root.className : "", label: label ? label.textContent : "", title: root ? root.title : "" }; },
+    isSyncStatusHealthy: response => syncStatusIsHealthy(response),
     getSoundMetrics: () => Object.assign({}, appState.soundMetrics),
     getRemoteNotificationState: () => ({ count: appState.remoteNotifications.total, queued: !!appState.remoteNotifications.timer }),
     getDragState: () => ({ active: appState.reorder.active, phase: appState.reorder.phase, cardId: appState.reorder.cardId, lane: appState.reorder.lane, targetLane: appState.reorder.targetLane, targetIndex: appState.reorder.targetIndex, pending: appState.reorder.pending }),
@@ -4190,12 +4193,7 @@ function renderSyncIndicator() {
   if (!root || !label || !clock) return;
   const now = Date.now();
   const status = appState.sync.lastStatus;
-  const source = status && status.source, local = status && status.local;
-  const sourceReady = !!(source && source.projects && source.projects.exists && source.audit && source.audit.exists);
-  const localReady = !!(local && local.projects && local.projects.exists && local.audit && local.audit.exists);
-  const sourceOrder = status && status.boardOrderJson, localOrder = local && local.boardOrder;
-  const orderMatching = !sourceOrder || (!sourceOrder.exists && (!localOrder || !localOrder.exists)) || (sourceOrder.exists && localOrder && localOrder.exists && sourceOrder.hash === localOrder.hash);
-  const matching = sourceReady && localReady && source.projects.hash === local.projects.hash && source.audit.hash === local.audit.hash && orderMatching;
+  const normalised = status ? (appState.sync.lastNormalised || normaliseSyncState(status)) : null;
   appState.sync.isEditing = appState.saving || isEditingActive();
   const lastSucceeded = appState.sync.lastSyncSucceededAt;
   const lastFailed = appState.sync.lastSyncFailedAt;
@@ -4205,13 +4203,19 @@ function renderSyncIndicator() {
     state = "warning"; text = "Editing — auto-sync paused"; detail = lastSucceeded ? "Last checked " + relativeSyncTime(lastSucceeded, now) : "No successful Team check yet"; timerText = "Paused";
   } else if (appState.sync.syncInFlight) {
     detail = lastSucceeded ? "Last checked " + relativeSyncTime(lastSucceeded, now) : "Connecting to the canonical source"; timerText = "Checking…";
-  } else if (failedMostRecently || (status && status.mode === "error")) {
-    state = "error"; text = "Sync check failed"; detail = appState.sync.lastError || "Invalid sync response"; timerText = retryCountdown(now);
-  } else if (status && !appState.sync.teamReachable) {
+  } else if (status && appState.sync.teamReachable === false) {
     state = "offline"; text = "Team ESMI unavailable"; detail = "Using local runtime view"; timerText = retryCountdown(now);
   } else if (appState.sync.pending) {
     state = "warning"; text = "Team ESMI update available"; detail = "Save or cancel the current edit to refresh"; timerText = "Paused";
-  } else if (status && status.teamReachable && status.mode === "team-canonical" && matching) {
+  } else if (status && normalised && normalised.healthState === "revision-mismatch") {
+    state = "warning"; text = "Sync revision differs"; detail = "Canonical and runtime data differ; refresh is required"; timerText = retryCountdown(now);
+  } else if (status && normalised && normalised.healthState === "malformed") {
+    state = "error"; text = "Sync response malformed"; detail = appState.sync.lastError || "Required sync metadata is missing or invalid"; timerText = retryCountdown(now);
+  } else if (status && normalised && normalised.healthState === "error") {
+    state = "error"; text = "Sync check failed"; detail = appState.sync.lastError || "Sync response reported an error"; timerText = retryCountdown(now);
+  } else if (failedMostRecently) {
+    state = "error"; text = "Sync check failed"; detail = appState.sync.lastError || "Invalid sync response"; timerText = retryCountdown(now);
+  } else if (status && normalised && normalised.syncHealthy === true) {
     state = "synced";
     const justSaved = appState.sync.lastSuccessMessage && /^Saved/i.test(appState.sync.lastSuccessMessage) && lastSucceeded && now - lastSucceeded < 10000;
     text = justSaved ? "Saved and synced to Team ESMI" : "Team ESMI synced";
@@ -4241,31 +4245,28 @@ function retryCountdown(now) {
   return "Retrying in " + Math.max(0, Math.ceil((appState.sync.nextSyncDueAt - now) / 1000)) + "s";
 }
 function syncStatusIsHealthy(status) {
-  const source = status && status.source, local = status && status.local;
-  const orderMatches = !status.boardOrderJson || (!status.boardOrderJson.exists && (!local || !local.boardOrder || !local.boardOrder.exists)) || (status.boardOrderJson.exists && local && local.boardOrder && local.boardOrder.exists && status.boardOrderJson.hash === local.boardOrder.hash);
-  const fileIndexMatches = !status.projectFileIndexJson || (!status.projectFileIndexJson.exists && (!local || !local.projectFileIndex || !local.projectFileIndex.exists)) || (status.projectFileIndexJson.exists && local && local.projectFileIndex && local.projectFileIndex.exists && status.projectFileIndexJson.signature === local.projectFileIndex.hash);
-  return !!(status && status.teamReachable && status.mode === "team-canonical" && source && local && orderMatches &&
-    source.projects && source.projects.exists && source.audit && source.audit.exists &&
-    local.projects && local.projects.exists && local.audit && local.audit.exists &&
-    source.projects.hash === local.projects.hash && source.audit.hash === local.audit.hash && fileIndexMatches);
+  const normalised = normaliseSyncState(status);
+  return normalised.syncHealthy === true;
 }
 function recordSyncCheck(status, error, successMessage) {
   const now = Date.now();
   if (status) {
+    const normalised = normaliseSyncState(status);
     appState.sync.lastStatus = status;
-    appState.sync.teamReachable = status.teamReachable === true;
-    if (syncStatusIsHealthy(status)) {
+    appState.sync.lastNormalised = normalised;
+    appState.sync.teamReachable = normalised.canonicalAvailable === true;
+    if (normalised.syncHealthy === true) {
       appState.sync.lastSyncSucceededAt = now;
       appState.sync.lastSyncFailedAt = null;
       appState.sync.lastError = "";
       if (successMessage) appState.sync.lastSuccessMessage = successMessage;
-    } else if (status.teamReachable === false && (status.mode === "offline" || status.mode === "local-fallback")) {
+    } else if (normalised.healthState === "unavailable") {
       appState.sync.lastSyncFailedAt = null;
       appState.sync.lastError = "";
       appState.sync.lastSuccessMessage = "";
     } else {
       appState.sync.lastSyncFailedAt = now;
-      appState.sync.lastError = "Canonical/runtime data status is inconsistent";
+      appState.sync.lastError = normalised.responseError || (normalised.healthState === "revision-mismatch" ? "Canonical/runtime data status is inconsistent" : "Sync response reported an error.");
       appState.sync.lastSuccessMessage = "";
     }
   } else if (error) {
@@ -4274,6 +4275,14 @@ function recordSyncCheck(status, error, successMessage) {
     appState.sync.lastSuccessMessage = "";
   }
   renderSyncIndicator();
+}
+function clearTransientSyncErrorAfterHealthyState(state) {
+  const normalised = normaliseSyncState(state);
+  if (!normalised.responseValid || normalised.canonicalAvailable !== true) return;
+  if (!appState.sync.lastNormalised || appState.sync.lastNormalised.syncHealthy !== true) return;
+  appState.sync.lastSyncFailedAt = null;
+  appState.sync.lastError = "";
+  if (!appState.sync.lastSyncSucceededAt) appState.sync.lastSyncSucceededAt = Date.now();
 }
 function startSyncCountdown() {
   if (appState.sync.countdownTimer) window.clearInterval(appState.sync.countdownTimer);
@@ -4296,35 +4305,172 @@ function sourceAuditSignature(status) {
   if (status && status.cardUpdatesJsonl) return [status.cardUpdatesJsonl.lastWriteUtc || status.cardUpdatesJsonl.timestamp || "", status.cardUpdatesJsonl.length || 0].join("|");
   return status && status.source && status.source.audit ? [status.source.audit.lastWriteUtc || "", status.source.audit.length || 0].join("|") : "";
 }
+function hasSyncProperty(value, name) {
+  return !!value && (typeof value === "object" || typeof value === "function") && Object.prototype.hasOwnProperty.call(value, name);
+}
+function syncText(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+function syncLength(value) {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  return null;
+}
+function normaliseSyncResource(value, present) {
+  const resource = value && typeof value === "object" ? value : {};
+  return {
+    present: present === true,
+    exists: resource.exists === true,
+    existsValid: present === true && typeof resource.exists === "boolean",
+    hash: syncText(resource.hash).toLowerCase(),
+    lastWriteUtc: syncText(resource.lastWriteUtc || resource.timestamp),
+    length: syncLength(resource.length),
+    signature: syncText(resource.signature)
+  };
+}
+function syncResourceSignature(resource) {
+  if (!resource || !resource.exists) return "";
+  if (resource.signature) return resource.signature;
+  return resource.lastWriteUtc && resource.length !== null ? resource.lastWriteUtc + "|" + String(resource.length) : "";
+}
+function compareNormalisedSyncResources(canonical, runtime, comparison) {
+  if (!canonical.present || !runtime.present) return { known: false, matches: true, malformed: false };
+  if (!canonical.exists) return { known: true, matches: !runtime.exists, malformed: !canonical.existsValid || !runtime.existsValid };
+  if (!canonical.existsValid || !runtime.existsValid) return { known: true, matches: false, malformed: true };
+  if (!runtime.exists) return { known: true, matches: false, malformed: false };
+  if (comparison === "hash" || comparison === "hash-or-signature") {
+    if (comparison === "hash-or-signature" && canonical.hash && runtime.hash) {
+      return { known: true, matches: canonical.hash === runtime.hash, malformed: false };
+    }
+  }
+  if (comparison === "hash") {
+    if (!canonical.hash || !runtime.hash) return { known: true, matches: false, malformed: true };
+    return { known: true, matches: canonical.hash === runtime.hash, malformed: false };
+  }
+  const canonicalSignature = syncResourceSignature(canonical);
+  const runtimeSignature = syncResourceSignature(runtime);
+  if (!canonicalSignature || !runtimeSignature) return { known: true, matches: false, malformed: true };
+  return { known: true, matches: canonicalSignature === runtimeSignature, malformed: false };
+}
+function normaliseSyncState(response) {
+  const raw = response && typeof response === "object" ? response : {};
+  const isFullStatus = hasSyncProperty(raw, "teamReachable") || hasSyncProperty(raw, "source") || hasSyncProperty(raw, "local") || hasSyncProperty(raw, "projectsJson") || hasSyncProperty(raw, "cardUpdatesJsonl");
+  const canonicalField = isFullStatus ? "teamReachable" : "canonicalAvailable";
+  const canonicalAvailable = typeof raw[canonicalField] === "boolean" ? raw[canonicalField] : null;
+  const mode = syncText(raw.mode);
+  const source = raw.source && typeof raw.source === "object" ? raw.source : null;
+  const local = raw.local && typeof raw.local === "object" ? raw.local : null;
+  const sourceProjectsPresent = !!(source && hasSyncProperty(source, "projects")) || hasSyncProperty(raw, "projectsJson");
+  const sourceAuditPresent = !!(source && hasSyncProperty(source, "audit")) || hasSyncProperty(raw, "cardUpdatesJsonl");
+  const runtimeProjectsPresent = !!(local && hasSyncProperty(local, "projects"));
+  const runtimeAuditPresent = !!(local && hasSyncProperty(local, "audit"));
+  const canonicalProjects = normaliseSyncResource(source && hasSyncProperty(source, "projects") ? source.projects : raw.projectsJson, sourceProjectsPresent);
+  const canonicalAudit = normaliseSyncResource(source && hasSyncProperty(source, "audit") ? source.audit : raw.cardUpdatesJsonl, sourceAuditPresent);
+  const runtimeProjects = normaliseSyncResource(local && hasSyncProperty(local, "projects") ? local.projects : null, runtimeProjectsPresent);
+  const runtimeAudit = normaliseSyncResource(local && hasSyncProperty(local, "audit") ? local.audit : null, runtimeAuditPresent);
+  const canonicalBoardOrderPresent = isFullStatus && hasSyncProperty(raw, "boardOrderJson");
+  const runtimeBoardOrderPresent = !!(local && hasSyncProperty(local, "boardOrder"));
+  const canonicalBoardOrder = normaliseSyncResource(canonicalBoardOrderPresent ? raw.boardOrderJson : null, canonicalBoardOrderPresent);
+  const runtimeBoardOrder = normaliseSyncResource(runtimeBoardOrderPresent ? local.boardOrder : null, runtimeBoardOrderPresent);
+  const canonicalProjectFileIndexPresent = isFullStatus && hasSyncProperty(raw, "projectFileIndexJson");
+  const runtimeProjectFileIndexPresent = !!(local && hasSyncProperty(local, "projectFileIndex"));
+  const canonicalProjectFileIndex = normaliseSyncResource(canonicalProjectFileIndexPresent ? raw.projectFileIndexJson : null, canonicalProjectFileIndexPresent);
+  const runtimeProjectFileIndex = normaliseSyncResource(runtimeProjectFileIndexPresent ? local.projectFileIndex : null, runtimeProjectFileIndexPresent);
+  const projectsRevision = isFullStatus ? sourceProjectsRevision(raw) : syncText(raw.projectsRevision);
+  const auditRevision = isFullStatus ? sourceAuditRevision(raw) : syncText(raw.latestAuditRevision);
+  const projectsSignature = isFullStatus ? sourceProjectsSignature(raw) : syncText(raw.projectsSignature);
+  const auditSignature = isFullStatus ? sourceAuditSignature(raw) : syncText(raw.latestAuditSignature);
+  const rawProjectFileIndexRevision = isFullStatus && raw.projectFileIndexJson ? raw.projectFileIndexJson.indexRevision : raw.projectFileIndexRevision;
+  const projectFileIndexRevision = Number.isFinite(Number(rawProjectFileIndexRevision)) ? Number(rawProjectFileIndexRevision) : 0;
+  const projectFileIndexSignature = isFullStatus && raw.projectFileIndexJson ? syncText(raw.projectFileIndexJson.signature) : syncText(raw.projectFileIndexSignature);
+  const basicResponseValid = canonicalAvailable !== null && !!mode;
+  const requiredMetadataValid = !isFullStatus || canonicalAvailable !== true || (
+    canonicalProjects.present && canonicalProjects.existsValid && canonicalAudit.present && canonicalAudit.existsValid &&
+    runtimeProjects.present && runtimeProjects.existsValid && runtimeAudit.present && runtimeAudit.existsValid
+  );
+  const responseValid = basicResponseValid && requiredMetadataValid;
+  let responseError = "";
+  if (!basicResponseValid) responseError = isFullStatus ? "Malformed sync response: team reachability or mode is missing." : "Malformed sync-state response: canonical availability or mode is missing.";
+  else if (!requiredMetadataValid) responseError = "Malformed sync response: required canonical/runtime project or audit metadata is missing.";
+  const comparisons = {
+    projects: compareNormalisedSyncResources(canonicalProjects, runtimeProjects, "hash"),
+    audit: compareNormalisedSyncResources(canonicalAudit, runtimeAudit, "hash"),
+    boardOrder: compareNormalisedSyncResources(canonicalBoardOrder, runtimeBoardOrder, "hash"),
+    projectFileIndex: compareNormalisedSyncResources(canonicalProjectFileIndex, runtimeProjectFileIndex, "hash-or-signature")
+  };
+  let healthState = "malformed";
+  if (responseValid) {
+    if (canonicalAvailable !== true) healthState = mode === "offline" || mode === "local-fallback" ? "unavailable" : "error";
+    else if (isFullStatus && mode !== "team-canonical") healthState = "error";
+    else if (!isFullStatus) healthState = "available";
+    else if (Object.keys(comparisons).some(key => comparisons[key].malformed)) {
+      healthState = "malformed";
+      responseError = "Malformed sync response: a required revision or signature value is invalid.";
+    } else if (Object.keys(comparisons).some(key => comparisons[key].known && !comparisons[key].matches)) healthState = "revision-mismatch";
+    else healthState = "synced";
+  }
+  return {
+    responseKind: isFullStatus ? "sync-status" : "sync-state",
+    responseValid: responseValid,
+    responseError: responseError,
+    canonicalAvailable: canonicalAvailable,
+    mode: mode,
+    projectsRevision: projectsRevision,
+    projectsSignature: projectsSignature,
+    projectsHash: canonicalProjects.hash,
+    projectsLength: canonicalProjects.length,
+    projectsLastWriteUtc: canonicalProjects.lastWriteUtc,
+    runtimeRevision: runtimeProjects.lastWriteUtc,
+    runtimeHash: runtimeProjects.hash,
+    runtimeLength: runtimeProjects.length,
+    runtimeLastWriteUtc: runtimeProjects.lastWriteUtc,
+    auditRevision: auditRevision,
+    latestAuditSignature: auditSignature,
+    boardOrderRevision: Number.isFinite(Number(raw.boardOrderRevision)) ? Number(raw.boardOrderRevision) : 0,
+    boardOrderChangeId: syncText(raw.boardOrderChangeId),
+    boardOrderSignature: syncText(raw.boardOrderSignature),
+    projectFileIndexRevision: projectFileIndexRevision,
+    projectFileIndexSignature: projectFileIndexSignature,
+    projectFileIndexRuntimeSignature: syncResourceSignature(runtimeProjectFileIndex),
+    syncHealthy: isFullStatus ? healthState === "synced" : null,
+    healthState: healthState,
+    comparisons: comparisons
+  };
+}
 function syncStateFromFullStatus(status) {
   const previous = appState.sync.lastState || {};
   const boardOrder = appState.boardOrder || {};
+  const normalised = normaliseSyncState(status);
   return {
-    canonicalAvailable: status && status.teamReachable === true,
-    mode: status && status.mode || "",
-    projectsRevision: sourceProjectsRevision(status),
-    projectsSignature: sourceProjectsSignature(status),
+    canonicalAvailable: normalised.canonicalAvailable === true,
+    mode: normalised.mode,
+    projectsRevision: normalised.projectsRevision,
+    projectsSignature: normalised.projectsSignature,
     boardOrderRevision: Number(boardOrder.revision || previous.boardOrderRevision || 0),
     boardOrderChangeId: String(boardOrder.changeId || previous.boardOrderChangeId || ""),
     boardOrderSignature: String(boardOrder.signature || previous.boardOrderSignature || ""),
-    latestAuditSignature: sourceAuditSignature(status),
-    projectFileIndexRevision: Number(status && status.projectFileIndexJson ? status.projectFileIndexJson.indexRevision || 0 : previous.projectFileIndexRevision || 0),
-    projectFileIndexSignature: String(status && status.projectFileIndexJson ? status.projectFileIndexJson.signature || "" : previous.projectFileIndexSignature || "")
+    latestAuditSignature: normalised.latestAuditSignature,
+    projectFileIndexRevision: normalised.projectFileIndexRevision || Number(previous.projectFileIndexRevision || 0),
+    projectFileIndexSignature: normalised.projectFileIndexSignature || String(previous.projectFileIndexSignature || "")
   };
 }
 function rememberSyncState(state, markInitial) {
   if (!state) return;
+  const normalisedState = normaliseSyncState(state);
   const normalized = {
-    canonicalAvailable: state.canonicalAvailable === true,
-    mode: String(state.mode || ""),
-    projectsRevision: String(state.projectsRevision || ""),
-    projectsSignature: String(state.projectsSignature || ""),
-    boardOrderRevision: Number(state.boardOrderRevision || 0),
-    boardOrderChangeId: String(state.boardOrderChangeId || ""),
-    boardOrderSignature: String(state.boardOrderSignature || ""),
-    latestAuditSignature: String(state.latestAuditSignature || ""),
-    projectFileIndexRevision: Number(state.projectFileIndexRevision || 0),
-    projectFileIndexSignature: String(state.projectFileIndexSignature || "")
+    canonicalAvailable: normalisedState.canonicalAvailable === true,
+    mode: normalisedState.mode,
+    projectsRevision: normalisedState.projectsRevision,
+    projectsSignature: normalisedState.projectsSignature,
+    boardOrderRevision: normalisedState.boardOrderRevision,
+    boardOrderChangeId: normalisedState.boardOrderChangeId,
+    boardOrderSignature: normalisedState.boardOrderSignature,
+    latestAuditSignature: normalisedState.latestAuditSignature,
+    projectFileIndexRevision: normalisedState.projectFileIndexRevision,
+    projectFileIndexSignature: normalisedState.projectFileIndexSignature
   };
   appState.sync.lastState = normalized;
   appState.sync.stateInitialized = markInitial !== false;
@@ -4350,13 +4496,14 @@ function syncStateChanged(previous, next) {
   return { changed: projectsChanged || orderChanged || auditChanged || filesChanged || previous.canonicalAvailable !== next.canonicalAvailable, projectsChanged, orderChanged, auditChanged, filesChanged };
 }
 function rememberSyncStatus(status, successMessage) {
+  const normalised = normaliseSyncState(status);
   recordSyncCheck(status, null, successMessage);
-  const projectsRevision = sourceProjectsRevision(status);
-  const auditRevision = sourceAuditRevision(status);
+  const projectsRevision = normalised.projectsRevision;
+  const auditRevision = normalised.auditRevision;
   if (projectsRevision) appState.sync.projectsRevision = projectsRevision;
   if (auditRevision) appState.sync.auditRevision = auditRevision;
-  const projectsSignature = sourceProjectsSignature(status);
-  const auditSignature = sourceAuditSignature(status);
+  const projectsSignature = normalised.projectsSignature;
+  const auditSignature = normalised.latestAuditSignature;
   if (projectsSignature) appState.sync.projectsSignature = projectsSignature;
   if (auditSignature) appState.sync.auditSignature = auditSignature;
   rememberSyncState(syncStateFromFullStatus(status), true);
@@ -4431,13 +4578,15 @@ function startAppVersionMonitoring() {
 async function fetchSyncStatus() {
   const r = await fetch("api/sync-status", { cache: "no-store" });
   const payload = await r.json();
-  if (!r.ok || !payload || payload.ok === false || typeof payload.teamReachable !== "boolean" || !payload.mode) throw new Error(payload && payload.error ? payload.error : ("Invalid sync response (HTTP " + r.status + ")"));
+  const normalised = normaliseSyncState(payload);
+  if (!r.ok || !payload || payload.ok === false || !normalised.responseValid) throw new Error(payload && payload.error ? payload.error : (normalised.responseError || ("Invalid sync response (HTTP " + r.status + ")")));
   return payload;
 }
 async function fetchSyncState() {
   const r = await fetch("api/sync-state?ts=" + Date.now(), { cache: "no-store" });
   const payload = await r.json();
-  if (!r.ok || !payload || payload.ok === false || typeof payload.canonicalAvailable !== "boolean") throw new Error(payload && payload.error ? payload.error : ("Invalid sync-state response (HTTP " + r.status + ")"));
+  const normalised = normaliseSyncState(payload);
+  if (!r.ok || !payload || payload.ok === false || !normalised.responseValid) throw new Error(payload && payload.error ? payload.error : (normalised.responseError || ("Invalid sync-state response (HTTP " + r.status + ")")));
   return payload;
 }
 async function loadLatestProjectsFromServer(message) {
@@ -4551,6 +4700,7 @@ async function pollSyncStatus() {
       }
     } else {
       rememberSyncState(state, true);
+      clearTransientSyncErrorAfterHealthyState(state);
     }
   } catch (err) {
     recordSyncCheck(null, err);
@@ -5863,6 +6013,7 @@ function bindEvents() {
     if (e.target.id === "recentToggle") {
       appState.recentFilter = !appState.recentFilter;
       renderRecentlyUpdatedStrip();
+      renderOrderHandleState();
       return;
     }
     const detailsButton = e.target.closest("[data-details]");

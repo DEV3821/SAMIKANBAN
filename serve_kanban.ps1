@@ -2096,7 +2096,7 @@ function Test-ProjectFileStableAccess {
 
 function Get-ProjectFileIndexStatus {
   $path = $script:CanonicalProjectFileIndexPath
-  $revision = Get-FileSignatureInfo -Path $path
+  $revision = Get-FileRevisionInfo -Path $path
   $baselineReady = $false
   $indexRevision = 0
   if ($revision.exists) {
@@ -2107,7 +2107,8 @@ function Get-ProjectFileIndexStatus {
       if ($null -ne $rawRevision) { [void][int]::TryParse([string]$rawRevision, [ref]$indexRevision) }
     } catch { }
   }
-  return [ordered]@{ exists = [bool]$revision.exists; path = $path; lastWriteUtc = [string]$revision.lastWriteUtc; signature = [string]$revision.signature; length = [int64]$revision.length; baselineReady = [bool]$baselineReady; indexRevision = [int]$indexRevision }
+  $lastWriteUtc = [string]$revision.lastWriteUtc
+  return [ordered]@{ exists = [bool]$revision.exists; path = $path; lastWriteUtc = $lastWriteUtc; timestamp = $lastWriteUtc; signature = if ($revision.exists) { $lastWriteUtc + '|' + [string]$revision.length } else { '' }; hash = [string]$revision.hash; length = [int64]$revision.length; baselineReady = [bool]$baselineReady; indexRevision = [int]$indexRevision }
 }
 
 function Invoke-ProjectFileScan {
