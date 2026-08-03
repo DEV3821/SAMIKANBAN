@@ -379,6 +379,31 @@
     transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
   }
   .card:hover { box-shadow: 0 10px 24px rgba(0,94,184,0.13); transform: translateY(-1px); }
+  .card.dragging { opacity: 0.58; transform: rotate(0.4deg); }
+  .card.order-drop-target { outline: 2px solid color-mix(in srgb, var(--sa-cyan) 70%, transparent); outline-offset: 3px; }
+  .order-drag-handle {
+    align-self: stretch;
+    min-width: 1.65rem;
+    padding: 0.18rem 0.2rem;
+    border: 1px dashed color-mix(in srgb, var(--muted) 48%, transparent);
+    color: var(--muted);
+    background: transparent;
+    cursor: grab;
+    line-height: 1;
+    letter-spacing: -0.12em;
+    touch-action: none;
+  }
+  .order-drag-handle:hover:not(:disabled), .order-drag-handle:focus-visible { color: var(--sa-blue); border-color: var(--sa-blue); }
+  .order-drag-handle:active { cursor: grabbing; }
+  .order-drag-handle[aria-disabled="true"] { cursor: not-allowed; opacity: 0.56; }
+  .order-insertion-marker {
+    height: 0.38rem;
+    margin: 0.18rem 0 0.45rem;
+    border-radius: 999px;
+    background: var(--sa-cyan);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--sa-cyan) 20%, transparent);
+  }
+  .column.order-drag-over { border-color: color-mix(in srgb, var(--sa-cyan) 68%, var(--line)); }
   .card.s-backlog { border-left-color: var(--status-backlog); }
   .card.s-running { border-left-color: var(--status-in-progress); }
   .card.s-blocked { border-left-color: var(--status-blocked); }
@@ -2161,6 +2186,7 @@
 </div>
 
 <div class="notice" id="notice"></div>
+<div class="sr-only" id="boardAriaLive" aria-live="polite" aria-atomic="true"></div>
 <div class="app-update-banner" id="appUpdateBanner" role="status" aria-live="polite"><span id="appUpdateMessage"></span><button id="appUpdateRefreshBtn" type="button">Refresh now</button></div>
 <div class="toolbar">
   <button class="primary" id="addProjectBtn" data-edit-required hidden>Add Project</button>
@@ -2435,6 +2461,10 @@ const PRESENTATION_STORAGE_KEY = "samiPresentationCardIds";
 const THEME_STORAGE_KEY = "samiPortfolioTheme";
 const PRESENTATION_THEME_STORAGE_KEY = "samiPresentationTheme";
 const SYNC_POLL_MS = 20000;
+const SYNC_FAST_POLL_MS = 2000;
+const SYNC_HIDDEN_POLL_MS = 10000;
+const REMOTE_NOTIFY_COALESCE_MS = 3000;
+const CLIENT_SESSION_STORAGE_KEY = "samiKanbanClientSession";
 let appState = {
   payload: null,
   projects: [],
@@ -2453,6 +2483,11 @@ let appState = {
   recentFilter: false,
   searchQuery: "",
   editingIndex: -1,
+  boardOrder: { loaded: false, canonicalAvailable: false, exists: false, valid: true, revision: 0, updatedAt: "", updatedBySession: "", changeId: "", signature: "", lanes: { backlog: [], running: [], blocked: [], done: [] }, warnings: [] },
+  reorder: { active: false, cardId: "", lane: "", priorLanes: null, pending: false, marker: null },
+  soundReady: false,
+  soundMetrics: { localChimes: 0, remoteChimes: 0 },
+  remoteNotifications: { count: 0, orderChanged: false, projectChanged: false, timer: null, seen: new Set() },
   reviewQueue: [],
   reviewIndex: 0,
   reviewStats: null,
@@ -2464,9 +2499,9 @@ let appState = {
   saving: false,
   appVersion: { loadedVersion: "", status: null, timer: null, checking: false },
   sync: {
-    projectsRevision: "", auditRevision: "", pending: null, timer: null, countdownTimer: null, lastStatus: null, lastError: "", lastSuccessMessage: "",
+    projectsRevision: "", projectsSignature: "", auditRevision: "", auditSignature: "", pending: null, timer: null, countdownTimer: null, lastStatus: null, lastState: null, stateInitialized: false, lastError: "", lastSuccessMessage: "",
     lastSyncStartedAt: null, lastSyncSucceededAt: null, lastSyncFailedAt: null, nextSyncDueAt: null,
-    isEditing: false, teamReachable: null, syncInFlight: false
+    isEditing: false, teamReachable: null, syncInFlight: false, ownBoardOrderChangeId: "", ownProjectsSignature: ""
   }
 };
 let splashReady = false;
@@ -2491,6 +2526,24 @@ function soundVolume() {
   return 0.08; // low
 }
 
+function getClientSessionId() {
+  let id = "";
+  try { id = sessionStorage.getItem(CLIENT_SESSION_STORAGE_KEY) || ""; } catch (_) {}
+  if (!id) {
+    try { id = crypto.randomUUID ? crypto.randomUUID() : "session-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2); }
+    catch (_) { id = "session-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2); }
+    try { sessionStorage.setItem(CLIENT_SESSION_STORAGE_KEY, id); } catch (_) {}
+  }
+  return id;
+}
+
+function announceBoard(message) {
+  const live = document.getElementById("boardAriaLive");
+  if (!live) return;
+  live.textContent = "";
+  window.setTimeout(() => { live.textContent = message; }, 20);
+}
+
 /* Subtle Web Audio confirmation chime. No external files. */
 let _audioCtx = null;
 function getAudioContext() {
@@ -2502,8 +2555,14 @@ function getAudioContext() {
   } catch (_) { _audioCtx = null; }
   return _audioCtx;
 }
-function playUpdateChime(volume) {
+function markSoundReady() {
+  appState.soundReady = true;
+  const ctx = getAudioContext();
+  if (ctx && ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} }
+}
+function playUpdateChime(volume, source) {
   if (!volume) return;
+  if (source === "remote" && !appState.soundReady) return;
   const ctx = getAudioContext();
   if (!ctx) return;
   if (ctx.state === "suspended") { try { ctx.resume(); } catch (_) {} }
@@ -2523,6 +2582,8 @@ function playUpdateChime(volume) {
       osc.connect(gain); gain.connect(ctx.destination);
       osc.start(start); osc.stop(end + 0.02);
     });
+    if (source === "remote") appState.soundMetrics.remoteChimes++;
+    else appState.soundMetrics.localChimes++;
   } catch (_) {}
 }
 
@@ -2549,6 +2610,7 @@ function onManualSaveSuccess(card, message) {
   _lastManualSaveKey = key; _lastManualSaveAt = now;
 
   showNotice(message || "Project updated", "ok");
+  announceBoard(message || "Project updated");
   if (card && card.id) {
     const el = document.getElementById("card-" + CSS.escape(card.id));
     if (el) {
@@ -2561,6 +2623,63 @@ function onManualSaveSuccess(card, message) {
   }
   const vol = soundVolume();
   if (vol) playUpdateChime(vol);
+}
+
+function onManualOrderSaveSuccess(card, message) {
+  const key = "order|" + (appState.boardOrder.changeId || appState.boardOrder.revision);
+  const now = Date.now();
+  if (key === _lastManualSaveKey && now - _lastManualSaveAt < 1500) return;
+  _lastManualSaveKey = key; _lastManualSaveAt = now;
+  showNotice(message || "Card order saved", "ok");
+  announceBoard(message || "Card order saved");
+  if (card && card.id) {
+    const el = document.getElementById("card-" + CSS.escape(card.id));
+    if (el) {
+      el.classList.remove("save-flash");
+      void el.offsetWidth;
+      el.classList.add("save-flash");
+      setTimeout(() => el.classList.remove("save-flash"), 1700);
+    }
+  }
+  const vol = soundVolume();
+  if (vol) playUpdateChime(vol);
+}
+
+function flushRemoteNotifications() {
+  const pending = appState.remoteNotifications;
+  if (!pending.count) return;
+  const count = pending.count;
+  const orderChanged = pending.orderChanged;
+  const projectChanged = pending.projectChanged;
+  pending.count = 0;
+  pending.orderChanged = false;
+  pending.projectChanged = false;
+  pending.timer = null;
+  let message = "A portfolio update was received.";
+  if (count > 1) message = count + " portfolio updates were received.";
+  else if (orderChanged && !projectChanged) message = "Card order was updated by another user.";
+  else if (projectChanged && !orderChanged) message = "A card was updated by another user.";
+  else if (orderChanged) message = "The latest Team ESMI board updates have been loaded.";
+  showNotice(message, "ok");
+  announceBoard(message);
+  const volume = soundVolume();
+  if (volume) playUpdateChime(volume, "remote");
+}
+
+function queueRemoteNotification(state, changes) {
+  if (!state || !changes) return;
+  const token = [state.projectsSignature || state.projectsRevision || "", state.boardOrderSignature || "", state.boardOrderChangeId || ""].join("|");
+  if (!token || appState.remoteNotifications.seen.has(token)) return;
+  appState.remoteNotifications.seen.add(token);
+  if (appState.remoteNotifications.seen.size > 80) {
+    const first = appState.remoteNotifications.seen.values().next().value;
+    appState.remoteNotifications.seen.delete(first);
+  }
+  appState.remoteNotifications.count++;
+  appState.remoteNotifications.orderChanged = appState.remoteNotifications.orderChanged || !!changes.orderChanged;
+  appState.remoteNotifications.projectChanged = appState.remoteNotifications.projectChanged || !!changes.projectChanged;
+  if (appState.remoteNotifications.timer) window.clearTimeout(appState.remoteNotifications.timer);
+  appState.remoteNotifications.timer = window.setTimeout(flushRemoteNotifications, REMOTE_NOTIFY_COALESCE_MS);
 }
 
 /* Save button state: prevents duplicate submissions while a save is pending. */
@@ -3071,6 +3190,10 @@ async function saveNewProjects(entries, createFolders) {
   const originalProjects = appState.projects.slice(); appState.payload.projects = originalProjects.concat(cards);
   try { await postJson("api/projects", appState.payload); }
   catch (err) { appState.payload.projects = originalProjects; throw new Error(err.message + (preSaveEvents.length ? " Folder creation was not rolled back; retry saving the project." : "")); }
+  if (appState.boardOrder.exists && appState.sync.teamReachable) {
+    const orderSaved = await persistLaneOrderAfterProjectCreate(cards);
+    if (!orderSaved) warnings.push("The new card was saved, but the shared lane order could not be updated.");
+  }
   warnings.push(...await appendAuditEvents(postSaveEvents));
   await loadLatestProjectsFromServer(cards.length + " project(s) saved and synced.");
   if (warnings.length) showNotice("Saved with warning: " + warnings.join(" | "), "error");
@@ -3258,6 +3381,322 @@ function normalizeCard(t, index) {
   if (!t.completedOutcome) t.completedOutcome = "";
   return t;
 }
+
+function cloneBoardOrderLanes(lanes) {
+  const copy = { backlog: [], running: [], blocked: [], done: [] };
+  COLS.forEach(col => { copy[col.key] = Array.isArray(lanes && lanes[col.key]) ? lanes[col.key].map(String) : []; });
+  return copy;
+}
+
+function buildStableBoardOrder(projects) {
+  const lanes = { backlog: [], running: [], blocked: [], done: [] };
+  (projects || []).forEach((card, index) => {
+    const normalized = normalizeCard(card, index);
+    if (lanes[normalized.status] && normalized.id) lanes[normalized.status].push(String(normalized.id));
+  });
+  return lanes;
+}
+
+function defaultBoardOrderState(projects, warning) {
+  return {
+    loaded: true,
+    canonicalAvailable: appState.sync.teamReachable === true,
+    exists: false,
+    valid: true,
+    schemaVersion: 1,
+    revision: 0,
+    updatedAt: "",
+    updatedBySession: "",
+    changeId: "",
+    signature: "",
+    lanes: buildStableBoardOrder(projects || []),
+    warnings: warning ? [warning] : []
+  };
+}
+
+function applyBoardOrderState(state) {
+  const source = state && typeof state === "object" ? state : {};
+  const warnings = Array.isArray(source.warnings) ? source.warnings.map(String) : (source.warning ? [String(source.warning)] : []);
+  appState.boardOrder = {
+    loaded: true,
+    canonicalAvailable: source.canonicalAvailable === true,
+    exists: source.exists === true,
+    valid: source.valid !== false,
+    schemaVersion: Number(source.schemaVersion || 1),
+    revision: Number.isFinite(Number(source.revision)) ? Number(source.revision) : 0,
+    updatedAt: String(source.updatedAt || ""),
+    updatedBySession: String(source.updatedBySession || ""),
+    changeId: String(source.changeId || ""),
+    signature: String(source.boardOrderSignature || source.signature || ""),
+    lanes: cloneBoardOrderLanes(source.lanes),
+    warnings: warnings
+  };
+}
+
+async function fetchBoardOrder() {
+  const response = await fetch("api/board-order?ts=" + Date.now(), { cache: "no-store" });
+  let payload = {};
+  try { payload = await response.json(); } catch (_) {}
+  if (!response.ok || !payload || payload.ok === false) throw new Error(payload.error || ("HTTP " + response.status));
+  return payload;
+}
+
+async function loadBoardOrder(projects, options) {
+  try {
+    const state = await fetchBoardOrder();
+    applyBoardOrderState(state);
+    if (state.warning && state.valid === false) {
+      showNotice("Shared board order warning: " + state.warning, "error");
+      announceBoard("Shared board order warning. The current portfolio order remains usable.");
+    }
+    return state;
+  } catch (err) {
+    const fallback = defaultBoardOrderState(projects || appState.projects, "Shared board order could not be loaded; the current projects.json ordering is being used.");
+    applyBoardOrderState(fallback);
+    console.warn("Board order unavailable; using current project ordering", err);
+    if (options && options.showWarning) showNotice(fallback.warnings[0], "error");
+    return fallback;
+  }
+}
+
+function orderedProjectsForBoard(projects) {
+  const normalized = (projects || []).map(normalizeCard);
+  const byId = new Map(normalized.filter(card => card && card.id).map(card => [String(card.id), card]));
+  const used = new Set();
+  const ordered = [];
+  COLS.forEach(col => {
+    const ids = appState.boardOrder && appState.boardOrder.lanes ? appState.boardOrder.lanes[col.key] : [];
+    (Array.isArray(ids) ? ids : []).forEach(id => {
+      const card = byId.get(String(id));
+      if (card && card.status === col.key && !used.has(card.id)) {
+        ordered.push(card);
+        used.add(card.id);
+      }
+    });
+    normalized.forEach(card => {
+      if (card && card.status === col.key && !used.has(card.id)) {
+        ordered.push(card);
+        used.add(card.id);
+      }
+    });
+  });
+  normalized.forEach(card => {
+    if (card && !used.has(card.id)) ordered.push(card);
+  });
+  return ordered;
+}
+
+function currentBoardOrderLanes() {
+  if (appState.boardOrder && appState.boardOrder.loaded && appState.boardOrder.lanes) {
+    return cloneBoardOrderLanes(appState.boardOrder.lanes);
+  }
+  const lanes = { backlog: [], running: [], blocked: [], done: [] };
+  (appState.projects || []).forEach(card => {
+    if (card && lanes[card.status] && card.id) lanes[card.status].push(String(card.id));
+  });
+  return lanes;
+}
+
+function boardSearchOrFilterActive() {
+  return normalizedSearchValue(appState.searchQuery).trim().length > 0 || !!appState.recentFilter;
+}
+
+function reorderDisabledReason() {
+  if (!appState.editingUnlocked) return "Unlock editing to reorder cards.";
+  if (!appState.sync.teamReachable) return "Team ESMI is unavailable; shared reordering is disabled.";
+  if (boardSearchOrFilterActive()) return "Clear search and filters to reorder cards.";
+  if (!appState.boardOrder.loaded) return "Shared board order is still loading.";
+  if (appState.saving || appState.reorder.pending) return "A save is already in progress.";
+  return "";
+}
+
+function canReorder(showReason) {
+  const reason = reorderDisabledReason();
+  if (reason && showReason) {
+    showNotice(reason, "error");
+    announceBoard(reason);
+  }
+  return !reason;
+}
+
+function orderCardById(id) {
+  const index = (appState.projects || []).findIndex(card => String(card.id) === String(id));
+  return index >= 0 ? appState.projects[index] : null;
+}
+
+function renderOrderHandleState() {
+  const reason = reorderDisabledReason();
+  document.querySelectorAll("[data-order-handle]").forEach(handle => {
+    handle.setAttribute("aria-disabled", reason ? "true" : "false");
+    handle.title = reason || "Drag to reorder within this lane. Alt+Up or Alt+Down also moves this card.";
+  });
+}
+
+function removeOrderMarker() {
+  const marker = appState.reorder.marker;
+  if (marker && marker.parentNode) marker.parentNode.removeChild(marker);
+  appState.reorder.marker = null;
+  document.querySelectorAll(".column.order-drag-over").forEach(column => column.classList.remove("order-drag-over"));
+  document.querySelectorAll(".card.order-drop-target").forEach(card => card.classList.remove("order-drop-target"));
+}
+
+function clearOrderDragState() {
+  removeOrderMarker();
+  document.querySelectorAll(".card.dragging").forEach(card => card.classList.remove("dragging"));
+  appState.reorder.active = false;
+  appState.reorder.cardId = "";
+  appState.reorder.lane = "";
+  appState.reorder.targetBeforeId = "";
+}
+
+function setOrderInsertionMarker(column, beforeCard) {
+  removeOrderMarker();
+  const marker = document.createElement("div");
+  marker.className = "order-insertion-marker";
+  marker.setAttribute("aria-hidden", "true");
+  if (beforeCard) {
+    beforeCard.parentNode.insertBefore(marker, beforeCard);
+    beforeCard.classList.add("order-drop-target");
+    appState.reorder.targetBeforeId = beforeCard.getAttribute("data-card-id") || "";
+  } else {
+    column.appendChild(marker);
+    appState.reorder.targetBeforeId = "";
+  }
+  appState.reorder.marker = marker;
+  column.classList.add("order-drag-over");
+}
+
+function dragBeforeCard(column, clientY, draggedId) {
+  const cards = Array.from(column.querySelectorAll(".card")).filter(card => card.getAttribute("data-card-id") !== draggedId);
+  for (const card of cards) {
+    const rect = card.getBoundingClientRect();
+    if (clientY < rect.top + rect.height / 2) return card;
+  }
+  return null;
+}
+
+function reorderLanesWithMove(lanes, lane, cardId, beforeId) {
+  const next = cloneBoardOrderLanes(lanes);
+  const current = next[lane] || [];
+  const without = current.filter(id => String(id) !== String(cardId));
+  let index = beforeId ? without.findIndex(id => String(id) === String(beforeId)) : without.length;
+  if (index < 0) index = without.length;
+  without.splice(index, 0, String(cardId));
+  next[lane] = without;
+  return next;
+}
+
+async function submitBoardOrder(nextLanes, options) {
+  const previousLanes = cloneBoardOrderLanes(currentBoardOrderLanes());
+  const previousState = Object.assign({}, appState.boardOrder, { lanes: previousLanes });
+  appState.boardOrder.lanes = cloneBoardOrderLanes(nextLanes);
+  appState.reorder.pending = true;
+  render(appState.projects, appState.meta, { skipAsyncRefresh: true });
+  const body = {
+    expectedRevision: Number(previousState.revision || 0),
+    clientSessionId: getClientSessionId(),
+    lanes: cloneBoardOrderLanes(nextLanes),
+    movedCardId: String((options && options.movedCardId) || ""),
+    auditAction: String((options && options.auditAction) || "")
+  };
+  try {
+    const response = await postJson("api/board-order", body);
+    if (response.orderState) applyBoardOrderState(response.orderState);
+    if (response.syncState) rememberSyncState(response.syncState, true);
+    appState.sync.ownBoardOrderChangeId = String(response.changeId || appState.boardOrder.changeId || "");
+    render(appState.projects, appState.meta, { skipAsyncRefresh: true });
+    const card = orderCardById(options && options.movedCardId);
+    if (!options || options.localFeedback !== false) onManualOrderSaveSuccess(card, options && options.successMessage || "Card order saved");
+    else announceBoard(options.successMessage || "Card status updated and lane order saved.");
+    return true;
+  } catch (err) {
+    if (err.status === 409 && err.payload && err.payload.orderState) {
+      applyBoardOrderState(err.payload.orderState);
+      render(appState.projects, appState.meta, { skipAsyncRefresh: true });
+      const message = "The board order was updated by another user. The latest order has been loaded.";
+      showNotice(message, "error");
+      announceBoard(message);
+    } else {
+      appState.boardOrder = previousState;
+      render(appState.projects, appState.meta, { skipAsyncRefresh: true });
+      const message = "Card order save failed: " + err.message;
+      showNotice(message, "error");
+      announceBoard(message);
+    }
+    return false;
+  } finally {
+    appState.reorder.pending = false;
+    updateEditState();
+  }
+}
+
+async function persistLaneOrderAfterStatusChange(cardId, previousStatus, nextStatus) {
+  if (!appState.boardOrder.exists || !appState.sync.teamReachable || previousStatus === nextStatus) return true;
+  const lanes = currentBoardOrderLanes();
+  COLS.forEach(col => { lanes[col.key] = lanes[col.key].filter(id => String(id) !== String(cardId)); });
+  if (lanes[nextStatus]) lanes[nextStatus].push(String(cardId));
+  return submitBoardOrder(lanes, { movedCardId: cardId, auditAction: "", localFeedback: false, successMessage: "Card status updated and lane order saved." });
+}
+
+async function persistLaneOrderAfterProjectCreate(cards) {
+  if (!appState.boardOrder.exists || !appState.sync.teamReachable || !Array.isArray(cards) || !cards.length) return true;
+  const lanes = currentBoardOrderLanes();
+  cards.forEach(card => {
+    if (card && lanes[card.status] && !lanes[card.status].some(id => String(id) === String(card.id))) lanes[card.status].push(String(card.id));
+  });
+  return submitBoardOrder(lanes, { movedCardId: "", auditAction: "", localFeedback: false, successMessage: "New cards appended to their workflow lanes." });
+}
+
+function focusOrderHandle(id) {
+  window.setTimeout(() => {
+    const handle = document.querySelector('[data-order-handle="' + CSS.escape(String(id)) + '"]');
+    if (handle) handle.focus();
+  }, 0);
+}
+
+async function moveCardByKeyboard(id, direction) {
+  if (!canReorder(true)) return;
+  const lanes = currentBoardOrderLanes();
+  const lane = COLS.map(col => col.key).find(key => lanes[key].some(value => String(value) === String(id)));
+  if (!lane) return;
+  const index = lanes[lane].findIndex(value => String(value) === String(id));
+  const target = index + direction;
+  if (target < 0 || target >= lanes[lane].length) {
+    announceBoard("Card is already at the edge of its lane.");
+    return;
+  }
+  const next = cloneBoardOrderLanes(lanes);
+  const moved = next[lane].splice(index, 1)[0];
+  next[lane].splice(target, 0, moved);
+  const saved = await submitBoardOrder(next, { movedCardId: id, auditAction: "card_reordered", localFeedback: true, successMessage: "Card moved within its lane." });
+  if (saved) focusOrderHandle(id);
+}
+
+function installBoardOrderTestHooks() {
+  if (!new URLSearchParams(location.search).has("samiTest")) return;
+  window.__samiTestHooks = {
+    getBoardOrder: () => JSON.parse(JSON.stringify(appState.boardOrder)),
+    getSyncState: () => JSON.parse(JSON.stringify({ teamReachable: appState.sync.teamReachable, lastState: appState.sync.lastState, pending: appState.sync.pending })),
+    getSoundMetrics: () => Object.assign({}, appState.soundMetrics),
+    getRemoteNotificationState: () => ({ count: appState.remoteNotifications.count, queued: !!appState.remoteNotifications.timer }),
+    markSoundReady: () => markSoundReady(),
+    resetSoundMetrics: () => { appState.soundMetrics.localChimes = 0; appState.soundMetrics.remoteChimes = 0; },
+    unlockForTest: async () => {
+      const response = await fetch("api/unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ pin: "" })
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.ok === false) throw new Error(payload.error || ("HTTP " + response.status));
+      setEditSession(payload.token, payload.expires);
+      render(appState.projects, appState.meta);
+      return payload;
+    },
+    clearSearch: () => clearBoardSearch(false)
+  };
+}
+
 function getUpdatedBy() {
   return localStorage.getItem(STORAGE_USER_KEY) || "Unknown";
 }
@@ -3291,7 +3730,9 @@ function renderSyncIndicator() {
   const source = status && status.source, local = status && status.local;
   const sourceReady = !!(source && source.projects && source.projects.exists && source.audit && source.audit.exists);
   const localReady = !!(local && local.projects && local.projects.exists && local.audit && local.audit.exists);
-  const matching = sourceReady && localReady && source.projects.hash === local.projects.hash && source.audit.hash === local.audit.hash;
+  const sourceOrder = status && status.boardOrderJson, localOrder = local && local.boardOrder;
+  const orderMatching = !sourceOrder || (!sourceOrder.exists && (!localOrder || !localOrder.exists)) || (sourceOrder.exists && localOrder && localOrder.exists && sourceOrder.hash === localOrder.hash);
+  const matching = sourceReady && localReady && source.projects.hash === local.projects.hash && source.audit.hash === local.audit.hash && orderMatching;
   appState.sync.isEditing = appState.saving || isEditingActive();
   const lastSucceeded = appState.sync.lastSyncSucceededAt;
   const lastFailed = appState.sync.lastSyncFailedAt;
@@ -3338,7 +3779,8 @@ function retryCountdown(now) {
 }
 function syncStatusIsHealthy(status) {
   const source = status && status.source, local = status && status.local;
-  return !!(status && status.teamReachable && status.mode === "team-canonical" && source && local &&
+  const orderMatches = !status.boardOrderJson || (!status.boardOrderJson.exists && (!local || !local.boardOrder || !local.boardOrder.exists)) || (status.boardOrderJson.exists && local && local.boardOrder && local.boardOrder.exists && status.boardOrderJson.hash === local.boardOrder.hash);
+  return !!(status && status.teamReachable && status.mode === "team-canonical" && source && local && orderMatches &&
     source.projects && source.projects.exists && source.audit && source.audit.exists &&
     local.projects && local.projects.exists && local.audit && local.audit.exists &&
     source.projects.hash === local.projects.hash && source.audit.hash === local.audit.hash);
@@ -3382,12 +3824,70 @@ function sourceAuditRevision(status) {
   if (status && status.cardUpdatesJsonl) return status.cardUpdatesJsonl.timestamp || status.cardUpdatesJsonl.lastWriteUtc || "";
   return status && status.source && status.source.audit ? (status.source.audit.lastWriteUtc || "") : "";
 }
+function sourceProjectsSignature(status) {
+  if (status && status.projectsJson) return [status.projectsJson.lastWriteUtc || status.projectsJson.timestamp || "", status.projectsJson.length || 0].join("|");
+  return status && status.source && status.source.projects ? [status.source.projects.lastWriteUtc || "", status.source.projects.length || 0].join("|") : "";
+}
+function sourceAuditSignature(status) {
+  if (status && status.cardUpdatesJsonl) return [status.cardUpdatesJsonl.lastWriteUtc || status.cardUpdatesJsonl.timestamp || "", status.cardUpdatesJsonl.length || 0].join("|");
+  return status && status.source && status.source.audit ? [status.source.audit.lastWriteUtc || "", status.source.audit.length || 0].join("|") : "";
+}
+function syncStateFromFullStatus(status) {
+  const previous = appState.sync.lastState || {};
+  const boardOrder = appState.boardOrder || {};
+  return {
+    canonicalAvailable: status && status.teamReachable === true,
+    mode: status && status.mode || "",
+    projectsRevision: sourceProjectsRevision(status),
+    projectsSignature: sourceProjectsSignature(status),
+    boardOrderRevision: Number(boardOrder.revision || previous.boardOrderRevision || 0),
+    boardOrderChangeId: String(boardOrder.changeId || previous.boardOrderChangeId || ""),
+    boardOrderSignature: String(boardOrder.signature || previous.boardOrderSignature || ""),
+    latestAuditSignature: sourceAuditSignature(status)
+  };
+}
+function rememberSyncState(state, markInitial) {
+  if (!state) return;
+  const normalized = {
+    canonicalAvailable: state.canonicalAvailable === true,
+    mode: String(state.mode || ""),
+    projectsRevision: String(state.projectsRevision || ""),
+    projectsSignature: String(state.projectsSignature || ""),
+    boardOrderRevision: Number(state.boardOrderRevision || 0),
+    boardOrderChangeId: String(state.boardOrderChangeId || ""),
+    boardOrderSignature: String(state.boardOrderSignature || ""),
+    latestAuditSignature: String(state.latestAuditSignature || "")
+  };
+  appState.sync.lastState = normalized;
+  appState.sync.stateInitialized = markInitial !== false;
+  appState.sync.teamReachable = normalized.canonicalAvailable;
+  if (Object.prototype.hasOwnProperty.call(state, "boardOrderSignature")) {
+    appState.boardOrder.signature = normalized.boardOrderSignature;
+  }
+  if (normalized.projectsRevision) appState.sync.projectsRevision = normalized.projectsRevision;
+  if (normalized.projectsSignature) appState.sync.projectsSignature = normalized.projectsSignature;
+  if (normalized.latestAuditSignature) appState.sync.auditSignature = normalized.latestAuditSignature;
+}
+function syncStateChanged(previous, next) {
+  if (!previous || !next) return { changed: false, projectsChanged: false, orderChanged: false, auditChanged: false };
+  const projectsChanged = String(previous.projectsSignature || previous.projectsRevision || "") !== String(next.projectsSignature || next.projectsRevision || "");
+  const orderChanged = String(previous.boardOrderSignature || "") !== String(next.boardOrderSignature || "") ||
+    String(previous.boardOrderChangeId || "") !== String(next.boardOrderChangeId || "") ||
+    Number(previous.boardOrderRevision || 0) !== Number(next.boardOrderRevision || 0);
+  const auditChanged = String(previous.latestAuditSignature || "") !== String(next.latestAuditSignature || "");
+  return { changed: projectsChanged || orderChanged || auditChanged || previous.canonicalAvailable !== next.canonicalAvailable, projectsChanged, orderChanged, auditChanged };
+}
 function rememberSyncStatus(status, successMessage) {
   recordSyncCheck(status, null, successMessage);
   const projectsRevision = sourceProjectsRevision(status);
   const auditRevision = sourceAuditRevision(status);
   if (projectsRevision) appState.sync.projectsRevision = projectsRevision;
   if (auditRevision) appState.sync.auditRevision = auditRevision;
+  const projectsSignature = sourceProjectsSignature(status);
+  const auditSignature = sourceAuditSignature(status);
+  if (projectsSignature) appState.sync.projectsSignature = projectsSignature;
+  if (auditSignature) appState.sync.auditSignature = auditSignature;
+  rememberSyncState(syncStateFromFullStatus(status), true);
 }
 function isEditingActive() {
   const active = document.activeElement;
@@ -3462,47 +3962,65 @@ async function fetchSyncStatus() {
   if (!r.ok || !payload || payload.ok === false || typeof payload.teamReachable !== "boolean" || !payload.mode) throw new Error(payload && payload.error ? payload.error : ("Invalid sync response (HTTP " + r.status + ")"));
   return payload;
 }
+async function fetchSyncState() {
+  const r = await fetch("api/sync-state?ts=" + Date.now(), { cache: "no-store" });
+  const payload = await r.json();
+  if (!r.ok || !payload || payload.ok === false || typeof payload.canonicalAvailable !== "boolean") throw new Error(payload && payload.error ? payload.error : ("Invalid sync-state response (HTTP " + r.status + ")"));
+  return payload;
+}
 async function loadLatestProjectsFromServer(message) {
   const status = await fetchSyncStatus();
   const dataResp = await fetch("data/projects.json?ts=" + Date.now(), { cache: "no-store" });
   if (!dataResp.ok) throw new Error("HTTP " + dataResp.status);
   appState.payload = await dataResp.json();
   rememberSyncStatus(status, message);
-  scheduleNextSync(SYNC_POLL_MS);
+  scheduleNextSync(document.visibilityState === "visible" ? SYNC_FAST_POLL_MS : SYNC_HIDDEN_POLL_MS);
   await loadAuditUpdates();
+  await loadBoardOrder(appState.payload.projects || [], { showWarning: false });
+  rememberSyncState(syncStateFromFullStatus(status), true);
   render(appState.payload.projects || [], appState.payload.meta || {});
   renderReviewCurrent();
   if (message) showNotice(message, "ok");
 }
-/* Background / remote refresh: updates cards and counts silently.
-   No chime, no "Project updated", no local save highlight. Shows a quiet,
-   deduplicated notice only when actual shared changes are detected. */
-let _lastQuietRefreshRevision = "";
-async function refreshFromSharedSource(message) {
+function captureBoardViewState() {
+  return { scrollY: window.scrollY || window.pageYOffset || 0, detailsCardId: appState.detailsCardId || "" };
+}
+function restoreBoardViewState(view) {
+  if (!view) return;
+  window.requestAnimationFrame(() => {
+    if (view.scrollY !== undefined) window.scrollTo(0, view.scrollY);
+  });
+}
+/* Background / remote refresh: updates cards, order and counts quietly, then
+   queues one coalesced notification for meaningful changes from another session. */
+async function refreshFromSharedSource(message, remoteChanges, remoteState) {
+  const view = captureBoardViewState();
   const status = await fetchSyncStatus();
   const dataResp = await fetch("data/projects.json?ts=" + Date.now(), { cache: "no-store" });
   if (!dataResp.ok) throw new Error("HTTP " + dataResp.status);
   appState.payload = await dataResp.json();
   rememberSyncStatus(status, message);
-  scheduleNextSync(SYNC_POLL_MS);
   await loadAuditUpdates();
+  const orderState = await loadBoardOrder(appState.payload.projects || [], { showWarning: false });
+  if (remoteState && orderState && remoteState.boardOrderSignature) appState.boardOrder.signature = remoteState.boardOrderSignature;
+  if (remoteState) rememberSyncState(remoteState, true);
   render(appState.payload.projects || [], appState.payload.meta || {});
   renderReviewCurrent();
-  const rev = sourceProjectsRevision(status);
-  if (rev && rev !== _lastQuietRefreshRevision && rev !== appState.sync.projectsRevision) {
-    _lastQuietRefreshRevision = rev;
-    showNotice("Portfolio refreshed with shared updates", "ok");
-  }
-  appState.sync.projectsRevision = rev || appState.sync.projectsRevision;
+  restoreBoardViewState(view);
+  if (remoteChanges && remoteChanges.changed) queueRemoteNotification(remoteState, remoteChanges);
 }
 async function applyPendingSync() {
   if (!appState.sync.pending) return;
   const pending = appState.sync.pending;
   appState.sync.pending = null;
-  await refreshFromSharedSource(pending.message || "Updated from Team ESMI");
+  if (appState.reorder.active) {
+    appState.sync.pending = pending;
+    return;
+  }
+  await refreshFromSharedSource(pending.message || "Updated from Team ESMI", pending.changes, pending.state);
 }
 function resumeSyncAfterEditing(forceCheck) {
-  if (isEditingActive()) return;
+  if (isEditingActive() || appState.reorder.active) return;
   renderAppVersion();
   if (appState.sync.pending) {
     applyPendingSync().catch(err => showNotice("Sync refresh failed: " + err.message, "error"));
@@ -3512,11 +4030,11 @@ function resumeSyncAfterEditing(forceCheck) {
 }
 async function pollSyncStatus() {
   if (appState.sync.syncInFlight) return;
-  appState.sync.isEditing = appState.saving || isEditingActive();
+  appState.sync.isEditing = appState.saving || isEditingActive() || appState.reorder.active;
   if (appState.sync.isEditing) {
     appState.sync.nextSyncDueAt = null;
     renderSyncIndicator();
-    scheduleNextSync(SYNC_POLL_MS);
+    scheduleNextSync(document.visibilityState === "visible" ? SYNC_FAST_POLL_MS : SYNC_HIDDEN_POLL_MS);
     return;
   }
   appState.sync.syncInFlight = true;
@@ -3524,18 +4042,22 @@ async function pollSyncStatus() {
   appState.sync.nextSyncDueAt = null;
   renderSyncIndicator();
   try {
-    const status = await fetchSyncStatus();
-    const nextProjectsRevision = sourceProjectsRevision(status);
-    const hasLoadedRevision = !!appState.sync.projectsRevision;
-    const sourceChanged = hasLoadedRevision && nextProjectsRevision && nextProjectsRevision !== appState.sync.projectsRevision;
-    rememberSyncStatus(status);
-    if (sourceChanged) {
+    const state = await fetchSyncState();
+    const previous = appState.sync.lastState;
+    const changes = appState.sync.stateInitialized ? syncStateChanged(previous, state) : { changed: false, projectsChanged: false, orderChanged: false, auditChanged: false };
+    rememberSyncState(state, true);
+    if (changes.changed) {
       if (isEditingActive()) {
-        appState.sync.pending = { revision: nextProjectsRevision, message: "Updated from Team ESMI" };
+        appState.sync.pending = { revision: state.projectsRevision, message: "Updated from Team ESMI", changes: changes, state: state };
         renderSyncIndicator();
-        showNotice("New updates are available. Finish or cancel your edit to refresh.", "ok");
+        showNotice("The portfolio was updated by another user. Finish or cancel your edit to refresh.", "ok");
+        announceBoard("The portfolio was updated by another user.");
+      } else if (appState.reorder.active) {
+        appState.sync.pending = { revision: state.projectsRevision, message: "Updated from Team ESMI", changes: changes, state: state };
+        showNotice("Another user changed the board. The latest order will load after this drag ends.", "ok");
+        announceBoard("Another user changed the board. The latest order will load after this drag ends.");
       } else {
-        await refreshFromSharedSource("Updated from Team ESMI");
+        await refreshFromSharedSource("Updated from Team ESMI", changes, state);
       }
     }
   } catch (err) {
@@ -3543,7 +4065,7 @@ async function pollSyncStatus() {
     console.warn("Sync poll failed", err);
   } finally {
     appState.sync.syncInFlight = false;
-    scheduleNextSync(SYNC_POLL_MS);
+    scheduleNextSync(document.visibilityState === "visible" ? SYNC_FAST_POLL_MS : SYNC_HIDDEN_POLL_MS);
     renderSyncIndicator();
   }
 }
@@ -3553,7 +4075,7 @@ function scheduleNextSync(delay) {
   appState.sync.timer = window.setTimeout(pollSyncStatus, delay);
 }
 function startSyncPolling() {
-  scheduleNextSync(SYNC_POLL_MS);
+  scheduleNextSync(document.visibilityState === "visible" ? SYNC_FAST_POLL_MS : SYNC_HIDDEN_POLL_MS);
 }
 function requestSyncCheck() {
   if (document.visibilityState && document.visibilityState !== "visible") return;
@@ -3615,6 +4137,7 @@ function updateEditState() {
     btn.disabled = !appState.editingUnlocked;
     btn.title = appState.editingUnlocked ? "" : "Unlock editing to update cards.";
   });
+  renderOrderHandleState();
 }
 function setOverviewOpen(open, remember) {
   const panel = document.getElementById("overviewPanel");
@@ -4119,8 +4642,9 @@ function renderCard(t) {
   const updatedAt = getCardUpdatedAt(t);
   const recentClass = hoursSince(updatedAt) !== null && hoursSince(updatedAt) < 24 ? " recent-strong" : (isRecentlyUpdated(updatedAt, 7) ? " recent-soft" : "");
   const detailsOpen = appState.detailsCardId === t.id;
+  const orderReason = reorderDisabledReason();
   let html = '<div class="card s-' + esc(t.status) + recentClass + (t.highlight ? ' highlight' : '') + '" id="card-' + attr(t.id) + '" data-card-id="' + attr(t.id) + '">';
-  html += '<div class="card-topline"><div class="title">' + esc(t.title) + '</div><div class="card-top-actions">' +
+  html += '<div class="card-topline"><button class="mini-btn order-drag-handle" type="button" draggable="true" data-order-handle="' + attr(t.id) + '" aria-label="Reorder ' + attr(t.title) + ' within ' + attr(STATUS_LABELS[t.status] || t.status) + '" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" aria-disabled="' + (orderReason ? 'true' : 'false') + '" title="' + attr(orderReason || 'Drag to reorder within this lane. Alt+Up or Alt+Down also moves this card.') + '">⋮⋮</button><div class="title">' + esc(t.title) + '</div><div class="card-top-actions">' +
     '<button class="mini-btn details-btn" type="button" data-details="' + attr(t.id) + '" aria-expanded="' + (detailsOpen ? 'true' : 'false') + '" aria-controls="details-' + attr(t.id) + '">Details</button>' +
     '<button class="mini-btn card-copy-ctx" type="button" data-copy-context="' + attr(t.id) + '" aria-label="Copy full project context for AI" title="Copy full project context for AI"><span class="copy-ctx-icon" aria-hidden="true">⧉</span></button>' +
     '<button class="mini-btn" data-edit="' + attr(t.id) + '" data-edit-required>Update</button></div></div>';
@@ -4249,7 +4773,7 @@ function clearBoardSearch(focusInput) {
   if (focusInput && input) input.focus();
 }
 function render(projects, meta, options) {
-  appState.projects = projects.map(normalizeCard);
+  appState.projects = orderedProjectsForBoard(projects);
   appState.meta = meta || {};
   projects = appState.projects;
   const searchActive = normalizedSearchValue(appState.searchQuery).trim().length > 0;
@@ -4264,7 +4788,7 @@ function render(projects, meta, options) {
     const policy = columnPolicyFor(col);
     const warning = fullItems.length > limit ? '<span class="wip-warning">WIP ' + fullItems.length + '/' + limit + '</span>' : "";
     const countLabel = searchActive ? items.length + " of " + fullItems.length : String(fullItems.length);
-    let colHtml = '<div class="column">';
+    let colHtml = '<div class="column" data-lane-key="' + attr(col.key) + '" data-order-enabled="true">';
     colHtml += '<div class="col-header ' + col.cls + '" title="' + attr(policy) + '">' + col.icon + ' ' + col.label +
                warning + ' <span class="count">' + countLabel + '</span></div>';
     if (items.length === 0) {
@@ -4301,6 +4825,7 @@ function render(projects, meta, options) {
   renderRecentlyUpdatedStrip();
   updateSearchControls(visibleProjects.length, projects.length);
   updateEditState();
+  renderOrderHandleState();
   if (!(options && options.skipAsyncRefresh)) refreshFolderStatuses().catch(() => {});
   if (isPresentationOpen()) renderPresentationBoard();
   if (document.getElementById("presentationPanel").classList.contains("open")) renderPresentationSetup();
@@ -4396,13 +4921,19 @@ async function postJson(url, body) {
   const headers = { "Content-Type": "application/json; charset=utf-8" };
   if (appState.editToken) headers["X-Kanban-Edit-Token"] = appState.editToken;
   if (appState.sync.projectsRevision) headers["X-Kanban-Projects-Revision"] = appState.sync.projectsRevision;
+  headers["X-Kanban-Client-Session"] = getClientSessionId();
   appState.saving = true;
   renderAppVersion();
   try {
     const r = await fetch(url, { method: "POST", headers: headers, body: JSON.stringify(body) });
     let payload = {};
     try { payload = await r.json(); } catch (_) {}
-    if (!r.ok || payload.ok === false) throw new Error(payload.error || ("HTTP " + r.status));
+    if (!r.ok || payload.ok === false) {
+      const error = new Error(payload.error || ("HTTP " + r.status));
+      error.status = r.status;
+      error.payload = payload;
+      throw error;
+    }
     if (payload.syncStatus) rememberSyncStatus(payload.syncStatus);
     return payload;
   } finally {
@@ -4418,6 +4949,7 @@ async function persistCard(action, note, mutate) {
   setSaveUi("saving");
   if (!(await ensureFreshBeforeSave())) return;
   const card = appState.projects[appState.editingIndex];
+  const previousStatus = normalizeStatus(card.status);
   const before = fieldSnapshot(card);
   if (mutate) mutate(card);
   else readFormInto(card);
@@ -4439,11 +4971,16 @@ async function persistCard(action, note, mutate) {
     note: note || ""
   };
   Object.assign(event, structuredActivity(action, diff));
+  let laneOrderWarning = "";
   try {
     await postJson("api/card-updates", event);
     rememberAuditUpdate(event);
     appState.payload.projects = appState.projects;
     await postJson("api/projects", appState.payload);
+    if (previousStatus !== normalizeStatus(card.status)) {
+      const orderSaved = await persistLaneOrderAfterStatusChange(card.id, previousStatus, normalizeStatus(card.status));
+      if (!orderSaved && appState.boardOrder.exists) laneOrderWarning = "Project updated, but the shared lane order could not be saved.";
+    }
     if (appState.reviewStats) countReviewAction(action);
     closeDrawer();
     setSaveUi("saved");
@@ -4451,6 +4988,7 @@ async function persistCard(action, note, mutate) {
     await loadLatestProjectsFromServer(null);
     renderReviewCurrent();
     onManualSaveSuccess(card, "Project updated");
+    if (laneOrderWarning) showNotice(laneOrderWarning, "error");
   } catch (err) {
     setSaveUi("failed");
     setTimeout(() => setSaveUi("idle"), 2400);
@@ -4633,6 +5171,69 @@ function bindEvents() {
   document.getElementById("meetingPackAuthorised").onclick = () => generateMeetingPack("authorised");
   document.getElementById("meetingPackModal").onclick = e => { if(e.target.id === "meetingPackModal") closeMeetingPack(); };
   document.getElementById("clearSearchBtn").onclick = () => clearBoardSearch(true);
+  document.addEventListener("pointerdown", markSoundReady, { passive: true });
+  document.addEventListener("keydown", markSoundReady, { passive: true });
+  document.body.addEventListener("dragstart", function(e) {
+    const handle = e.target.closest && e.target.closest("[data-order-handle]");
+    if (!handle) return;
+    if (!canReorder(true)) { e.preventDefault(); return; }
+    const card = handle.closest(".card");
+    const column = handle.closest(".column");
+    const id = handle.getAttribute("data-order-handle");
+    const lane = column && column.getAttribute("data-lane-key");
+    if (!card || !id || !lane || !COLS.some(col => col.key === lane)) { e.preventDefault(); return; }
+    appState.reorder.active = true;
+    appState.reorder.cardId = id;
+    appState.reorder.lane = lane;
+    appState.reorder.targetBeforeId = "";
+    appState.reorder.crossLaneAnnounced = false;
+    card.classList.add("dragging");
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      try { e.dataTransfer.setData("text/plain", id); } catch (_) {}
+    }
+    renderSyncIndicator();
+  });
+  document.body.addEventListener("dragover", function(e) {
+    if (!appState.reorder.active) return;
+    const column = e.target.closest && e.target.closest(".column");
+    if (!column) return;
+    const lane = column.getAttribute("data-lane-key");
+    if (lane !== appState.reorder.lane) {
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "none";
+      removeOrderMarker();
+      appState.reorder.targetBeforeId = "";
+      if (!appState.reorder.crossLaneAnnounced) {
+        appState.reorder.crossLaneAnnounced = true;
+        announceBoard("Cross-lane dropping is not enabled. Use the existing status controls to move cards between lanes.");
+      }
+      return;
+    }
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    const beforeCard = dragBeforeCard(column, e.clientY, appState.reorder.cardId);
+    setOrderInsertionMarker(column, beforeCard);
+  });
+  document.body.addEventListener("drop", async function(e) {
+    if (!appState.reorder.active) return;
+    const column = e.target.closest && e.target.closest(".column");
+    if (!column || column.getAttribute("data-lane-key") !== appState.reorder.lane) return;
+    e.preventDefault();
+    const id = appState.reorder.cardId;
+    const lane = appState.reorder.lane;
+    const beforeId = appState.reorder.targetBeforeId || "";
+    const priorLanes = currentBoardOrderLanes();
+    const nextLanes = reorderLanesWithMove(priorLanes, lane, id, beforeId);
+    clearOrderDragState();
+    await submitBoardOrder(nextLanes, { movedCardId: id, auditAction: "card_reordered", localFeedback: true, successMessage: "Card order saved." });
+    if (appState.sync.pending) resumeSyncAfterEditing(true);
+  });
+  document.body.addEventListener("dragend", function(e) {
+    if (!appState.reorder.active) return;
+    clearOrderDragState();
+    renderSyncIndicator();
+    if (appState.sync.pending) resumeSyncAfterEditing(true);
+  });
   document.body.addEventListener("click", function(e) {
     if (e.target.closest("#splash")) {
       if (splashCanDismiss) hideSplash();
@@ -4723,6 +5324,12 @@ function bindEvents() {
     setTimeout(resumeSyncAfterEditing, 0);
   });
   document.body.addEventListener("keydown", function(e) {
+    const orderHandle = e.target.closest && e.target.closest("[data-order-handle]");
+    if (orderHandle && e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      e.preventDefault();
+      moveCardByKeyboard(orderHandle.getAttribute("data-order-handle"), e.key === "ArrowUp" ? -1 : 1);
+      return;
+    }
     const leadId = e.target.getAttribute("data-lead-input");
     if (!leadId) return;
     if (e.key === "Enter") {
@@ -4931,8 +5538,11 @@ async function boot() {
       setUpdatedBy(user.username || "Unknown");
     }
     await loadAuditUpdates();
+    await loadBoardOrder(appState.payload.projects || [], { showWarning: true });
     render(appState.payload.projects || [], appState.payload.meta || {});
+    try { rememberSyncState(await fetchSyncState(), true); } catch (stateErr) { console.warn("Lightweight sync-state check unavailable", stateErr); }
     startSyncPolling();
+    installBoardOrderTestHooks();
     markSplashReady();
   } catch (err) {
     appState.sync.syncInFlight = false;

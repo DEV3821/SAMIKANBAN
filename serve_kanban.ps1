@@ -374,6 +374,438 @@ function Get-FileRevisionInfo {
   }
 }
 
+function Get-FileSignatureInfo {
+  param([string]$Path)
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    return @{
+      exists = $false
+      path = $Path
+      lastWriteUtc = ""
+      length = 0
+      signature = ""
+    }
+  }
+
+  $item = Get-Item -LiteralPath $Path
+  $lastWriteUtc = $item.LastWriteTimeUtc.ToString("o")
+  return @{
+    exists = $true
+    path = $Path
+    lastWriteUtc = $lastWriteUtc
+    length = $item.Length
+    signature = $lastWriteUtc + "|" + [string]$item.Length
+  }
+}
+
+function Get-BoardOrderLaneKeys {
+  return @('backlog', 'running', 'blocked', 'done')
+}
+
+function ConvertTo-BoardOrderStatus {
+  param([string]$Status)
+
+  $value = ([string]$Status).Trim().ToLowerInvariant()
+  switch ($value) {
+    'ready' { return 'backlog' }
+    'todo' { return 'backlog' }
+    'queued' { return 'backlog' }
+    'inprogress' { return 'running' }
+    'in-progress' { return 'running' }
+    'active' { return 'running' }
+    'doing' { return 'running' }
+    'complete' { return 'done' }
+    'completed' { return 'done' }
+    'closed' { return 'done' }
+    default { return $value }
+  }
+}
+
+function New-BoardOrderLaneMap {
+  return [ordered]@{
+    backlog = @()
+    running = @()
+    blocked = @()
+    done = @()
+  }
+}
+
+function Read-BoardOrderFile {
+  param([string]$Path)
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    return [pscustomobject]@{ exists = $false; valid = $false; payload = $null; error = "" }
+  }
+
+  try {
+    $raw = Get-Content -LiteralPath $Path -Raw
+    if ([string]::IsNullOrWhiteSpace($raw)) { throw "board_order.json is empty." }
+    $payload = $raw | ConvertFrom-Json
+    if ($null -eq $payload -or $null -eq $payload.lanes) { throw "board_order.json must contain a lanes object." }
+    if ($payload.PSObject.Properties.Name -contains 'schemaVersion' -and [int]$payload.schemaVersion -ne 1) {
+      throw "Unsupported board_order.json schema version: $($payload.schemaVersion)."
+    }
+    return [pscustomobject]@{ exists = $true; valid = $true; payload = $payload; error = "" }
+  } catch {
+    return [pscustomobject]@{ exists = $true; valid = $false; payload = $null; error = $_.Exception.Message }
+  }
+}
+
+function Get-BoardOrderRevisionFromPayload {
+  param($Payload)
+
+  if ($null -eq $Payload -or -not ($Payload.PSObject.Properties.Name -contains 'revision')) { return 0 }
+  $revision = 0
+  if ([int]::TryParse([string]$Payload.revision, [ref]$revision) -and $revision -ge 0) { return $revision }
+  return 0
+}
+
+function Get-BoardOrderReconciledLanes {
+  param(
+    [object[]]$Projects,
+    $OrderPayload = $null
+  )
+
+  $lanes = New-BoardOrderLaneMap
+  $warnings = New-Object 'System.Collections.Generic.List[string]'
+  $projectById = @{}
+  $projectStatusById = @{}
+  $stableByLane = New-BoardOrderLaneMap
+  $stableProjects = @()
+
+  foreach ($project in @($Projects)) {
+    if ($null -eq $project) { continue }
+    $id = [string]$project.id
+    if ([string]::IsNullOrWhiteSpace($id)) {
+      $warnings.Add('A project without an id was omitted from board order reconciliation.')
+      continue
+    }
+    if ($projectById.ContainsKey($id)) {
+      $warnings.Add("Duplicate project id in projects.json was ignored: $id")
+      continue
+    }
+    $status = ConvertTo-BoardOrderStatus -Status ([string]$project.status)
+    if (-not ((Get-BoardOrderLaneKeys) -contains $status)) {
+      $warnings.Add("Project $id has unsupported status '$($project.status)' and was omitted from board order.")
+      continue
+    }
+    $projectById[$id] = $project
+    $projectStatusById[$id] = $status
+    $stableProjects += $id
+    $stableByLane[$status] += $id
+  }
+
+  $seen = New-Object 'System.Collections.Generic.HashSet[string]'
+  foreach ($lane in (Get-BoardOrderLaneKeys)) {
+    $rawIds = @()
+    if ($null -ne $OrderPayload -and $null -ne $OrderPayload.lanes) {
+      $property = $OrderPayload.lanes.PSObject.Properties[$lane]
+      if ($null -ne $property) {
+        if ($property.Value -is [System.Array]) { $rawIds = @($property.Value) }
+        elseif ($null -ne $property.Value) { $warnings.Add("Lane '$lane' must contain an array of card IDs.") }
+      }
+    }
+
+    foreach ($rawId in $rawIds) {
+      $id = [string]$rawId
+      if ([string]::IsNullOrWhiteSpace($id)) {
+        $warnings.Add("An empty card ID in lane '$lane' was ignored.")
+        continue
+      }
+      if (-not $projectById.ContainsKey($id)) {
+        $warnings.Add("Unknown card ID '$id' in lane '$lane' was ignored.")
+        continue
+      }
+      if ($seen.Contains($id)) {
+        $warnings.Add("Duplicate card ID '$id' in board order was ignored after its first valid occurrence.")
+        continue
+      }
+      if ($projectStatusById[$id] -ne $lane) {
+        $warnings.Add("Card ID '$id' was listed in '$lane' but its project status is '$($projectStatusById[$id])'; the entry was ignored.")
+        continue
+      }
+      $lanes[$lane] += $id
+      [void]$seen.Add($id)
+    }
+  }
+
+  foreach ($id in $stableProjects) {
+    if (-not $seen.Contains($id)) {
+      $lane = $projectStatusById[$id]
+      $lanes[$lane] += $id
+      [void]$seen.Add($id)
+    }
+  }
+
+  return @{
+    lanes = $lanes
+    warnings = $warnings.ToArray()
+    projectById = $projectById
+    projectStatusById = $projectStatusById
+    stableByLane = $stableByLane
+  }
+}
+
+function Get-SafeBoardOrderSessionId {
+  param([string]$Value)
+
+  $candidate = ([string]$Value).Trim()
+  if ($candidate.Length -gt 80) { $candidate = $candidate.Substring(0, 80) }
+  if ($candidate -match '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$') { return $candidate }
+  return 'session-' + [Guid]::NewGuid().ToString('N').Substring(0, 16)
+}
+
+function Get-BoardOrderAuthorityProjectsPath {
+  if ($script:TeamReachable) { return $script:CanonicalProjectsPath }
+  return $script:RuntimeProjectsPath
+}
+
+function Get-BoardOrderAuthorityPath {
+  if ($script:TeamReachable) { return $script:CanonicalBoardOrderPath }
+  return $script:RuntimeBoardOrderPath
+}
+
+function Write-AtomicUtf8TextFile {
+  param([string]$Path, [string]$Text)
+
+  $parent = Split-Path -Parent $Path
+  if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+    New-Item -ItemType Directory -Path $parent -Force | Out-Null
+  }
+  $tempPath = $Path + '.tmp-' + [Guid]::NewGuid().ToString('N')
+  try {
+    [System.IO.File]::WriteAllText($tempPath, $Text, [System.Text.UTF8Encoding]::new($false))
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+      try {
+        [System.IO.File]::Replace($tempPath, $Path, $null, $true)
+      } catch {
+        Move-Item -LiteralPath $tempPath -Destination $Path -Force
+      }
+    } else {
+      [System.IO.File]::Move($tempPath, $Path)
+    }
+  } finally {
+    if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
+      Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
+function Get-BoardOrderState {
+  [void](Update-TeamReachability)
+  $authorityProjectsPath = Get-BoardOrderAuthorityProjectsPath
+  if (-not (Test-Path -LiteralPath $authorityProjectsPath -PathType Leaf)) {
+    throw "Projects source is unavailable for board order: $authorityProjectsPath"
+  }
+  $projectsPayload = Get-Content -LiteralPath $authorityProjectsPath -Raw | ConvertFrom-Json
+  if ($null -eq $projectsPayload.projects) { throw "Projects source does not contain a projects array." }
+
+  $authorityPath = Get-BoardOrderAuthorityPath
+  $read = Read-BoardOrderFile -Path $authorityPath
+  if ($script:TeamReachable -and $read.exists -and $read.valid) {
+    try {
+      [void](Copy-CanonicalFileToRuntime -CanonicalPath $script:CanonicalBoardOrderPath -RuntimePath $script:RuntimeBoardOrderPath -Label 'board_order.json')
+    } catch {
+      Write-ServerLog "WARNING: board order runtime mirror refresh failed: $($_.Exception.Message)"
+    }
+  }
+
+  $orderPayload = if ($read.valid) { $read.payload } else { $null }
+  $reconciled = Get-BoardOrderReconciledLanes -Projects @($projectsPayload.projects) -OrderPayload $orderPayload
+  $warnings = New-Object 'System.Collections.Generic.List[string]'
+  foreach ($warning in @($reconciled.warnings)) { $warnings.Add([string]$warning) }
+  if (-not $read.exists) { $warnings.Add('Shared board order is not present; the current projects.json ordering is being used.') }
+  if ($read.exists -and -not $read.valid) { $warnings.Add('Shared board order is malformed; the current projects.json ordering is being used.') }
+
+  return [ordered]@{
+    ok = $true
+    canonicalAvailable = [bool]$script:TeamReachable
+    mode = $script:EffectiveMode
+    exists = [bool]$read.exists
+    valid = [bool]$read.valid
+    schemaVersion = 1
+    revision = if ($read.valid) { Get-BoardOrderRevisionFromPayload -Payload $read.payload } else { 0 }
+    updatedAt = if ($read.valid) { [string]$read.payload.updatedAt } else { '' }
+    updatedBySession = if ($read.valid) { [string]$read.payload.updatedBySession } else { '' }
+    changeId = if ($read.valid) { [string]$read.payload.changeId } else { '' }
+    lanes = $reconciled.lanes
+    warnings = $warnings.ToArray()
+    warning = if ($warnings.Count) { $warnings[0] } else { '' }
+  }
+}
+
+function Get-BoardOrderMetadata {
+  param([string]$Path)
+
+  $read = Read-BoardOrderFile -Path $Path
+  return @{
+    exists = [bool]$read.exists
+    valid = [bool]$read.valid
+    revision = if ($read.valid) { Get-BoardOrderRevisionFromPayload -Payload $read.payload } else { 0 }
+    updatedAt = if ($read.valid) { [string]$read.payload.updatedAt } else { '' }
+    changeId = if ($read.valid) { [string]$read.payload.changeId } else { '' }
+    warning = if ($read.exists -and -not $read.valid) { $read.error } elseif (-not $read.exists) { 'board_order.json is absent' } else { '' }
+  }
+}
+
+function Get-BoardOrderSyncState {
+  [void](Update-TeamReachability)
+  $projectsPath = Get-BoardOrderAuthorityProjectsPath
+  $auditPath = if ($script:TeamReachable) { $script:CanonicalAuditPath } else { $script:RuntimeAuditPath }
+  $orderPath = Get-BoardOrderAuthorityPath
+  $projects = Get-FileSignatureInfo -Path $projectsPath
+  $audit = Get-FileSignatureInfo -Path $auditPath
+  $order = Get-FileSignatureInfo -Path $orderPath
+  $orderMeta = Get-BoardOrderMetadata -Path $orderPath
+  return [ordered]@{
+    ok = $true
+    canonicalAvailable = [bool]$script:TeamReachable
+    mode = $script:EffectiveMode
+    projectsRevision = [string]$projects.lastWriteUtc
+    projectsSignature = [string]$projects.signature
+    boardOrderRevision = [int]$orderMeta.revision
+    boardOrderChangeId = [string]$orderMeta.changeId
+    boardOrderSignature = [string]$order.signature
+    boardOrderExists = [bool]$orderMeta.exists
+    boardOrderWarning = [string]$orderMeta.warning
+    latestAuditSignature = [string]$audit.signature
+    serverTime = (Get-Date).ToString('o')
+  }
+}
+
+function Save-BoardOrder {
+  param([string]$Body)
+
+  [void](Update-TeamReachability)
+  if (-not $script:TeamReachable) {
+    throw 'Team ESMI is unavailable; shared board order cannot be saved.'
+  }
+
+  $payload = $Body | ConvertFrom-Json
+  if ($null -eq $payload -or $null -eq $payload.lanes) { throw 'Board order payload must include lanes.' }
+  $expectedRevision = 0
+  if (-not [int]::TryParse([string]$payload.expectedRevision, [ref]$expectedRevision) -or $expectedRevision -lt 0) {
+    throw 'Board order expectedRevision must be a non-negative integer.'
+  }
+
+  $currentRead = Read-BoardOrderFile -Path $script:CanonicalBoardOrderPath
+  if ($currentRead.exists -and -not $currentRead.valid) {
+    throw 'Shared board order is malformed. Repair it before saving a new order.'
+  }
+  $currentRevision = if ($currentRead.valid) { Get-BoardOrderRevisionFromPayload -Payload $currentRead.payload } else { 0 }
+  if ($expectedRevision -ne $currentRevision) {
+    throw "Board order revision is stale. Expected $expectedRevision but the canonical revision is $currentRevision."
+  }
+
+  $laneKeys = Get-BoardOrderLaneKeys
+  $submittedNames = @($payload.lanes.PSObject.Properties.Name)
+  foreach ($name in $submittedNames) {
+    if ($laneKeys -notcontains [string]$name) { throw "Unknown board order lane '$name'." }
+  }
+  foreach ($lane in $laneKeys) {
+    if ($submittedNames -notcontains $lane) { throw "Board order payload is missing lane '$lane'." }
+  }
+
+  if (-not (Test-Path -LiteralPath $script:CanonicalProjectsPath -PathType Leaf)) {
+    throw "Team ESMI projects source is missing: $script:CanonicalProjectsPath"
+  }
+  $projectsPayload = Get-Content -LiteralPath $script:CanonicalProjectsPath -Raw | ConvertFrom-Json
+  if ($null -eq $projectsPayload.projects) { throw 'Team ESMI projects source does not contain a projects array.' }
+  $base = Get-BoardOrderReconciledLanes -Projects @($projectsPayload.projects) -OrderPayload $null
+  $nextLanes = New-BoardOrderLaneMap
+  $seen = New-Object 'System.Collections.Generic.HashSet[string]'
+  foreach ($lane in $laneKeys) {
+    $value = $payload.lanes.PSObject.Properties[$lane].Value
+    if ($value -isnot [System.Array]) { throw "Board order lane '$lane' must be an array of card IDs." }
+    foreach ($rawId in @($value)) {
+      $id = [string]$rawId
+      if ([string]::IsNullOrWhiteSpace($id)) { throw "Board order lane '$lane' contains an empty card ID." }
+      if (-not $base.projectStatusById.ContainsKey($id)) { throw "Unknown project ID '$id' in board order." }
+      if ($base.projectStatusById[$id] -ne $lane) { throw "Project ID '$id' is in '$lane' but its status is '$($base.projectStatusById[$id])'." }
+      if (-not $seen.Add($id)) { throw "Duplicate project ID '$id' in board order." }
+      $nextLanes[$lane] += $id
+    }
+  }
+  foreach ($lane in $laneKeys) {
+    foreach ($id in @($base.stableByLane[$lane])) {
+      if ($seen.Add($id)) { $nextLanes[$lane] += $id }
+    }
+  }
+
+  $auditAction = ''
+  $movedCardId = ''
+  $clientSessionId = ''
+  if ($payload.PSObject.Properties.Name -contains 'auditAction') { $auditAction = [string]$payload.auditAction }
+  if ($payload.PSObject.Properties.Name -contains 'movedCardId') { $movedCardId = [string]$payload.movedCardId }
+  if ($payload.PSObject.Properties.Name -contains 'clientSessionId') { $clientSessionId = [string]$payload.clientSessionId }
+  if ($auditAction -eq 'card_reordered' -and -not [string]::IsNullOrWhiteSpace($movedCardId) -and -not $base.projectStatusById.ContainsKey($movedCardId)) {
+    throw "Reordered card '$movedCardId' is not present in the current projects source."
+  }
+
+  $updatedAt = (Get-Date).ToString('o')
+  $changeId = [Guid]::NewGuid().ToString()
+  $sessionId = Get-SafeBoardOrderSessionId -Value $clientSessionId
+  $record = [ordered]@{
+    schemaVersion = 1
+    revision = $currentRevision + 1
+    updatedAt = $updatedAt
+    updatedBySession = $sessionId
+    changeId = $changeId
+    lanes = $nextLanes
+  }
+  $json = $record | ConvertTo-Json -Depth 10
+  Backup-Once -Path $script:CanonicalBoardOrderPath
+  Write-AtomicUtf8TextFile -Path $script:CanonicalBoardOrderPath -Text ($json + [Environment]::NewLine)
+
+  $runtimeCopied = $false
+  try {
+    $runtimeCopied = Copy-CanonicalFileToRuntime -CanonicalPath $script:CanonicalBoardOrderPath -RuntimePath $script:RuntimeBoardOrderPath -Label 'board_order.json'
+  } catch {
+    Write-ServerLog "WARNING: canonical board order committed but runtime mirror refresh failed: $($_.Exception.Message)"
+  }
+
+  $auditWarning = ''
+  if ($auditAction -eq 'card_reordered' -and -not [string]::IsNullOrWhiteSpace($movedCardId)) {
+    $movedId = $movedCardId
+    $currentOrderPayload = $null
+    if ($currentRead.valid) { $currentOrderPayload = $currentRead.payload }
+    $oldReconciled = Get-BoardOrderReconciledLanes -Projects @($projectsPayload.projects) -OrderPayload $currentOrderPayload
+    $lane = $base.projectStatusById[$movedId]
+    if ($oldReconciled.projectStatusById.ContainsKey($movedId) -and $oldReconciled.projectStatusById[$movedId] -ne $lane) { throw "Reordered card '$movedId' changed lanes; cross-lane drag is not supported." }
+    $previousIndex = [array]::IndexOf([string[]]$oldReconciled.lanes[$lane], $movedId)
+    $newIndex = [array]::IndexOf([string[]]$nextLanes[$lane], $movedId)
+    if ($previousIndex -ge 0 -and $newIndex -ge 0) {
+      $event = [ordered]@{
+        timestamp = $updatedAt
+        cardId = $movedId
+        action = 'card_reordered'
+        updatedBy = $sessionId
+        actor = $sessionId
+        lane = $lane
+        previousIndex = $previousIndex
+        newIndex = $newIndex
+        boardOrderRevision = $record.revision
+        boardOrderChangeId = $changeId
+      }
+      try {
+        $auditPaths = @($script:CanonicalAuditPath, $script:RuntimeAuditPath)
+        Append-AuditEvent -Body ($event | ConvertTo-Json -Depth 10 -Compress) -AuditPaths $auditPaths
+      } catch {
+        $auditWarning = 'Board order committed, but the reorder audit event could not be appended.'
+        Write-ServerLog "WARNING: $auditWarning $($_.Exception.Message)"
+      }
+    }
+  }
+
+  $state = Get-BoardOrderState
+  $state['committed'] = $true
+  $state['runtimeCopied'] = [bool]$runtimeCopied
+  $state['auditWarning'] = $auditWarning
+  $state['changeId'] = $changeId
+  $state['revision'] = $record.revision
+  return $state
+}
+
 function Get-CardConflictKey {
   param($Card, [int]$Index)
 
@@ -724,10 +1156,13 @@ function Copy-CanonicalFileToRuntime {
 }
 
 function Sync-CanonicalToRuntime {
-  $result = @{ projectsCopied=$false; auditCopied=$false; skipped='' }
+  $result = @{ projectsCopied=$false; auditCopied=$false; boardOrderCopied=$false; skipped='' }
   if (-not (Update-TeamReachability)) { $result.skipped = 'team_unreachable'; return $result }
   $result.projectsCopied = Copy-CanonicalFileToRuntime -CanonicalPath $script:CanonicalProjectsPath -RuntimePath $script:RuntimeProjectsPath -Label 'projects.json'
   $result.auditCopied = Copy-CanonicalFileToRuntime -CanonicalPath $script:CanonicalAuditPath -RuntimePath $script:RuntimeAuditPath -Label 'card_updates.jsonl'
+  if (Test-Path -LiteralPath $script:CanonicalBoardOrderPath -PathType Leaf) {
+    $result.boardOrderCopied = Copy-CanonicalFileToRuntime -CanonicalPath $script:CanonicalBoardOrderPath -RuntimePath $script:RuntimeBoardOrderPath -Label 'board_order.json'
+  }
   return $result
 }
 
@@ -739,6 +1174,8 @@ function Get-SyncStatus {
   $audit = Get-CanonicalFileStatus -Path $script:CanonicalAuditPath
   $runtimeProjects = Get-FileRevisionInfo -Path $script:RuntimeProjectsPath
   $runtimeAudit = Get-FileRevisionInfo -Path $script:RuntimeAuditPath
+  $order = Get-CanonicalFileStatus -Path $script:CanonicalBoardOrderPath
+  $runtimeOrder = Get-FileRevisionInfo -Path $script:RuntimeBoardOrderPath
   $projectFilesExists = Test-CanonicalContainerSafe -Path $script:CanonicalProjectFilesRoot
   return @{
     ok = $true
@@ -749,6 +1186,7 @@ function Get-SyncStatus {
     teamReachable = [bool]$script:TeamReachable
     projectsJson = $projects
     cardUpdatesJsonl = $audit
+    boardOrderJson = $order
     projectFiles = @{
       path = $script:CanonicalProjectFilesRoot
       exists = [bool]$projectFilesExists
@@ -757,7 +1195,7 @@ function Get-SyncStatus {
     }
     lastChecked = (Get-Date).ToString('o')
     source = @{ projects=@{ exists=$projects.readable; path=$projects.path; lastWriteUtc=$projects.lastWriteUtc; hash=$projects.hash; length=$projects.length }; audit=@{ exists=$audit.readable; path=$audit.path; lastWriteUtc=$audit.lastWriteUtc; hash=$audit.hash; length=$audit.length } }
-    local = @{ projects=$runtimeProjects; audit=$runtimeAudit }
+    local = @{ projects=$runtimeProjects; audit=$runtimeAudit; boardOrder=$runtimeOrder }
     synced = $SyncResult
   }
 }
@@ -780,8 +1218,9 @@ function Append-AuditEvent {
   param([string]$Body, [string[]]$AuditPaths)
 
   $event = $Body | ConvertFrom-Json
-  if ([string]::IsNullOrWhiteSpace($event.timestamp) -or [string]::IsNullOrWhiteSpace($event.cardTitle)) {
-    throw "Audit event must include timestamp and cardTitle."
+  if ([string]::IsNullOrWhiteSpace($event.timestamp) -or
+      ([string]$event.action -ne 'card_reordered' -and [string]::IsNullOrWhiteSpace($event.cardTitle))) {
+    throw "Audit event must include timestamp and cardTitle unless it is a card_reordered event."
   }
 
   $safe = Redact-AuditObject $event
@@ -1222,10 +1661,12 @@ try {
   $script:LastTeamCheck = Get-Date
   $script:CanonicalProjectsPath = Join-Path $CanonicalRoot 'data\projects.json'
   $script:CanonicalAuditPath = Join-Path $CanonicalRoot 'data\card_updates.jsonl'
+  $script:CanonicalBoardOrderPath = Join-Path $CanonicalRoot 'data\board_order.json'
   $script:CanonicalConfigPath = Join-Path $CanonicalRoot 'data\kanban_config.json'
   $script:CanonicalProjectFilesRoot = Join-Path $CanonicalRoot 'project_files'
   $script:RuntimeProjectsPath = Join-Path $Root 'data\projects.json'
   $script:RuntimeAuditPath = Join-Path $Root 'data\card_updates.jsonl'
+  $script:RuntimeBoardOrderPath = Join-Path $Root 'data\board_order.json'
   $script:RuntimeConfigPath = Join-Path $Root 'data\kanban_config.json'
   $script:LocalProjectFilesRoot = Join-Path $LocalMirrorRoot 'project_files'
   [void](Update-TeamReachability)
@@ -1258,6 +1699,7 @@ try {
   Write-ServerLog "runtime data/projects.json readable: $jsonPath"
   Write-ServerLog "canonical data/projects.json readable=$([bool](Test-Path -LiteralPath $teamJsonPath -PathType Leaf)) writable=$(Test-FileWritableWithoutChange $teamJsonPath): $teamJsonPath"
   Write-ServerLog "canonical data/card_updates.jsonl readable=$([bool](Test-Path -LiteralPath $teamAuditPath -PathType Leaf)) writable=$(Test-FileWritableWithoutChange $teamAuditPath): $teamAuditPath"
+  Write-ServerLog "canonical data/board_order.json readable=$([bool](Test-Path -LiteralPath $script:CanonicalBoardOrderPath -PathType Leaf)) writable=$(Test-DirectoryWritableFromAcl (Split-Path -Parent $script:CanonicalBoardOrderPath)): $script:CanonicalBoardOrderPath"
   Write-ServerLog "canonical project_files readable=$(Test-CanonicalContainerSafe -Path $script:CanonicalProjectFilesRoot) writable=$(Test-DirectoryWritableFromAcl $script:CanonicalProjectFilesRoot): $($script:CanonicalProjectFilesRoot)"
   Repair-UserShortcutIcons -AppRoot $Root
 
@@ -1287,6 +1729,26 @@ try {
         $pathOnly = ($rawPath -split "\?")[0]
         $requestBody = Read-RequestBody -Stream $stream -Request $request -InitialBuffer $buffer -InitialRead $read
         try {
+          if ($pathOnly -eq "/api/board-order") {
+            [void](Update-TeamReachability)
+            $authorityConfigPath = if ($script:TeamReachable -and (Test-Path -LiteralPath $teamConfigPath -PathType Leaf)) { $teamConfigPath } else { $configPath }
+            Require-EditToken -Request $request -ConfigPath $authorityConfigPath
+            try {
+              $orderResult = Save-BoardOrder -Body $requestBody
+              $syncState = Get-BoardOrderSyncState
+              Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload @{ ok = $true; orderState = $orderResult; syncState = $syncState; revision = $orderResult.revision; changeId = $orderResult.changeId }
+              Write-ServerLog "200 POST $rawPath boardOrderRevision=$($orderResult.revision) changeId=$($orderResult.changeId)"
+            } catch {
+              if ($_.Exception.Message -match '^Board order revision is stale') {
+                $currentOrder = Get-BoardOrderState
+                Send-Json -Stream $stream -StatusCode 409 -StatusText "Conflict" -Payload @{ ok = $false; error = 'The board order was updated by another user. The latest order has been loaded.'; orderState = $currentOrder; syncState = Get-BoardOrderSyncState }
+                Write-ServerLog "409 POST $rawPath stale board order revision"
+              } else {
+                throw
+              }
+            }
+            continue
+          }
           if ($pathOnly -eq "/api/projects") {
             [void](Update-TeamReachability)
             if (-not $script:TeamReachable -and $script:EffectiveMode -ne 'local-fallback') { throw "Team ESMI is unreachable and local fallback writes are not enabled." }
@@ -1349,9 +1811,9 @@ try {
           Send-Response -Stream $stream -StatusCode 404 -StatusText "Not Found" -Body $body
           Write-ServerLog "404 $method $rawPath"
           continue
-        } catch {
-          Write-ExceptionLog -Exception $_.Exception -Prefix "SAVE ERROR"
-          $status = if ($_.Exception.Message -match "locked|PIN") { 401 } elseif ($_.Exception.Message -match "source changed|Refresh the board") { 409 } elseif ($_.Exception.Message -match "does not exist|was not found") { 404 } elseif ($_.Exception.Message -match "unreachable|unavailable") { 503 } elseif ($_.Exception.Message -match "Invalid|must be|required|outside the approved|does not match") { 400 } else { 500 }
+      } catch {
+        Write-ExceptionLog -Exception $_.Exception -Prefix "SAVE ERROR"
+          $status = if ($_.Exception.Message -match "locked|PIN") { 401 } elseif ($_.Exception.Message -match "source changed|Refresh the board|board order revision") { 409 } elseif ($_.Exception.Message -match "does not exist|was not found") { 404 } elseif ($_.Exception.Message -match "unreachable|unavailable") { 503 } elseif ($_.Exception.Message -match "Invalid|must be|required|outside the approved|does not match|Unknown board order|Unknown project ID|Duplicate project ID|Reordered card|project ID.*status|malformed") { 400 } else { 500 }
           $statusText = if ($status -eq 400) { "Bad Request" } elseif ($status -eq 401) { "Unauthorized" } elseif ($status -eq 404) { "Not Found" } elseif ($status -eq 409) { "Conflict" } elseif ($status -eq 503) { "Service Unavailable" } else { "Save Failed" }
           Send-Json -Stream $stream -StatusCode $status -StatusText $statusText -Payload @{ ok = $false; error = $_.Exception.Message }
           continue
@@ -1404,6 +1866,18 @@ try {
         $syncStatus = Get-SyncStatus -SyncResult $syncResult
         Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload $syncStatus
         Write-ServerLog "200 $method $rawPath"
+        continue
+      }
+      if ($pathOnly -eq "/api/sync-state") {
+        $syncState = Get-BoardOrderSyncState
+        Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload $syncState
+        Write-ServerLog "200 $method $rawPath lightweight state check"
+        continue
+      }
+      if ($pathOnly -eq "/api/board-order") {
+        $orderState = Get-BoardOrderState
+        Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload $orderState
+        Write-ServerLog "200 $method $rawPath boardOrderRevision=$($orderState.revision)"
         continue
       }
       if ($pathOnly -eq "/api/app-version/status") {

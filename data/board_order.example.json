@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "updatedAt": "2026-08-03T10:15:50+09:30",
+  "updatedBySession": "synthetic-client-a",
+  "changeId": "synthetic-change-001",
+  "lanes": {
+    "backlog": [
+      "example-project-beta"
+    ],
+    "running": [
+      "example-project-alpha"
+    ],
+    "blocked": [],
+    "done": []
+  }
+}
