@@ -1,12 +1,22 @@
 # SAMI Kanban WorkServer Change Log
 
+## 2026-08-03 — 2026.08.03.122015
+
+- Dragging is easier and can begin from the non-interactive card surface, while buttons, links, inputs, labels, file controls and Project Context controls remain protected.
+- Cards can now be dragged between workflow lanes.
+- Cross-lane dragging updates card status and shared ordering through one atomic server-side operation with revision checks, backups, rollback and a `card_moved` audit event.
+- The board automatically scrolls near the screen edge during dragging and retains a clear ghost, placeholder and insertion marker.
+- Remote reordered and moved cards now update visually before the notification chime; canonical projects and board order are fetched, reconciled, rendered and DOM-verified as one bounded refresh.
+- Alt+Up / Alt+Down reorders within a lane and Alt+Left / Alt+Right moves cards between lanes with the same revision and audit protections.
+- Existing Start Menu installations receive the update automatically. No reinstall is required; the launcher, shortcut structure, runtime path, port, and canonical-root discovery are unchanged.
+
 ## 2026-08-03 — 2026.08.03.101550
 
 - Added within-lane card reordering for Backlog, In Progress, Blocked, and Done using a dedicated drag handle and Alt+Up / Alt+Down keyboard movement.
 - Added shared `data/board_order.json` persistence with canonical Team ESMI revision checks, backups, atomic writes, stale-order HTTP 409 handling, and non-destructive reconciliation.
 - Added lightweight two-second visible sync-state polling with slower hidden polling and full portfolio/order fetches only after a verified shared signature change.
 - Added coalesced remote update notifications and remote chimes for changes made by another Kanban session, with self-echo suppression and Off/Low/Normal sound preferences preserved.
-- Reordering requires unlocked editing, Team ESMI availability, and cleared search/filter state. Cross-lane drag is not supported; existing status controls remain authoritative and append moved cards to the new lane order when shared ordering exists.
+- Reordering requires unlocked editing, Team ESMI availability, and cleared search/filter state. This earlier release did not support cross-lane drag; the 2026.08.03.122015 hotfix adds the bounded atomic move path.
 - Existing installations receive the updated application shell through the normal Team ESMI bootstrap refresh. Reinstalling is not required; the launcher, shortcut structure, runtime path, port, and canonical-root discovery are unchanged.
 
 ## 2026-07-17 — 2026.07.17.081709

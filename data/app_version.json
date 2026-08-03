@@ -1,6 +1,6 @@
 {
-    "version":  "2026.08.03.101550",
-    "releasedAt":  "2026-08-03T10:15:50.0000000+09:30",
-    "message":  "Shared within-lane card ordering, canonical board-order revisions, near-real-time remote refresh and coalesced remote update chimes",
+    "version":  "2026.08.03.122015",
+    "releasedAt":  "2026-08-03T12:20:15.0000000+09:30",
+    "message":  "Easier bounded drag and drop, atomic cross-lane card moves, edge auto-scroll, and verified remote visual updates before chimes",
     "requiresReload":  true
 }

@@ -602,6 +602,7 @@ function Get-BoardOrderState {
 
   $authorityPath = Get-BoardOrderAuthorityPath
   $read = Read-BoardOrderFile -Path $authorityPath
+  $fileSignature = Get-FileSignatureInfo -Path $authorityPath
   if ($script:TeamReachable -and $read.exists -and $read.valid) {
     try {
       [void](Copy-CanonicalFileToRuntime -CanonicalPath $script:CanonicalBoardOrderPath -RuntimePath $script:RuntimeBoardOrderPath -Label 'board_order.json')
@@ -628,6 +629,8 @@ function Get-BoardOrderState {
     updatedAt = if ($read.valid) { [string]$read.payload.updatedAt } else { '' }
     updatedBySession = if ($read.valid) { [string]$read.payload.updatedBySession } else { '' }
     changeId = if ($read.valid) { [string]$read.payload.changeId } else { '' }
+    boardOrderSignature = [string]$fileSignature.signature
+    signature = [string]$fileSignature.signature
     lanes = $reconciled.lanes
     warnings = $warnings.ToArray()
     warning = if ($warnings.Count) { $warnings[0] } else { '' }
@@ -804,6 +807,278 @@ function Save-BoardOrder {
   $state['changeId'] = $changeId
   $state['revision'] = $record.revision
   return $state
+}
+
+function Get-CardMoveState {
+  [void](Update-TeamReachability)
+  $projects = Get-FileRevisionInfo -Path $script:CanonicalProjectsPath
+  $orderState = Get-BoardOrderState
+  $syncState = Get-BoardOrderSyncState
+  return [ordered]@{
+    projectsRevision = [string]$projects.lastWriteUtc
+    boardOrderRevision = [int]$orderState.revision
+    changeId = [string]$orderState.changeId
+    orderState = $orderState
+    syncState = $syncState
+  }
+}
+
+function New-ValidatedTransactionFile {
+  param(
+    [string]$Destination,
+    [string]$Text,
+    [string]$Label
+  )
+
+  $tempPath = $Destination + '.tx-' + [Guid]::NewGuid().ToString('N')
+  try {
+    [System.IO.File]::WriteAllText($tempPath, $Text, [System.Text.UTF8Encoding]::new($false))
+    $parsed = Get-Content -LiteralPath $tempPath -Raw | ConvertFrom-Json
+    if ($null -eq $parsed) { throw "$Label transaction file is empty or invalid." }
+    return $tempPath
+  } catch {
+    if (Test-Path -LiteralPath $tempPath -PathType Leaf) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue }
+    throw
+  }
+}
+
+function Replace-PreparedTransactionFile {
+  param([string]$TempPath, [string]$Destination)
+
+  if (Test-Path -LiteralPath $Destination -PathType Leaf) {
+    try {
+      [System.IO.File]::Replace($TempPath, $Destination, $null, $true)
+    } catch {
+      Move-Item -LiteralPath $TempPath -Destination $Destination -Force
+    }
+  } else {
+    [System.IO.File]::Move($TempPath, $Destination)
+  }
+}
+
+function Restore-TransactionFile {
+  param(
+    [string]$Path,
+    [bool]$PreviouslyExists,
+    [string]$PreviousText
+  )
+
+  if ($PreviouslyExists) {
+    Write-AtomicUtf8TextFile -Path $Path -Text $PreviousText
+  } elseif (Test-Path -LiteralPath $Path -PathType Leaf) {
+    Remove-Item -LiteralPath $Path -Force
+  }
+}
+
+function Save-CardMove {
+  param([string]$Body)
+
+  [void](Update-TeamReachability)
+  if (-not $script:TeamReachable) {
+    throw 'Team ESMI is unavailable; shared card moves cannot be saved.'
+  }
+
+  $payload = $Body | ConvertFrom-Json
+  if ($null -eq $payload) { throw 'Card move payload is invalid.' }
+  $cardId = Assert-ProjectId -ProjectId ([string]$payload.cardId)
+  $fromLane = ([string]$payload.fromLane).Trim().ToLowerInvariant()
+  $toLane = ([string]$payload.toLane).Trim().ToLowerInvariant()
+  $laneKeys = Get-BoardOrderLaneKeys
+  if ($laneKeys -notcontains $fromLane) { throw "Invalid source lane '$fromLane'." }
+  if ($laneKeys -notcontains $toLane) { throw "Invalid destination lane '$toLane'." }
+
+  $toIndex = 0
+  if (-not [int]::TryParse([string]$payload.toIndex, [ref]$toIndex) -or $toIndex -lt 0) {
+    throw 'Card move toIndex must be a non-negative integer.'
+  }
+  $expectedProjectsRevision = ([string]$payload.expectedProjectsRevision).Trim()
+  if ([string]::IsNullOrWhiteSpace($expectedProjectsRevision)) { throw 'Card move expectedProjectsRevision is required.' }
+  $expectedBoardOrderRevision = 0
+  if (-not [int]::TryParse([string]$payload.expectedBoardOrderRevision, [ref]$expectedBoardOrderRevision) -or $expectedBoardOrderRevision -lt 0) {
+    throw 'Card move expectedBoardOrderRevision must be a non-negative integer.'
+  }
+
+  $clientSessionId = ''
+  if ($payload.PSObject.Properties.Name -contains 'clientSessionId') { $clientSessionId = [string]$payload.clientSessionId }
+  $sessionId = Get-SafeBoardOrderSessionId -Value $clientSessionId
+  $projectsPath = $script:CanonicalProjectsPath
+  $orderPath = $script:CanonicalBoardOrderPath
+  $auditPath = $script:CanonicalAuditPath
+  $runtimeProjectsPath = $script:RuntimeProjectsPath
+  $runtimeOrderPath = $script:RuntimeBoardOrderPath
+  $runtimeAuditPath = $script:RuntimeAuditPath
+
+  $lockStream = $null
+  $lockPath = $projectsPath + '.card-move.lock'
+  try {
+    try {
+      $lockStream = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+    } catch {
+      throw 'Card move transaction is busy; retry.'
+    }
+
+    $currentProjectsInfo = Get-FileRevisionInfo -Path $projectsPath
+    if (-not $currentProjectsInfo.exists) { throw "Team ESMI projects source is missing: $projectsPath" }
+    if (-not $expectedProjectsRevision.Equals([string]$currentProjectsInfo.lastWriteUtc, [System.StringComparison]::OrdinalIgnoreCase)) {
+      throw "Card move projects revision is stale. Expected $expectedProjectsRevision but the canonical revision is $($currentProjectsInfo.lastWriteUtc)."
+    }
+
+    $projectsText = [System.IO.File]::ReadAllText($projectsPath, [System.Text.Encoding]::UTF8)
+    $projectsPayload = $projectsText | ConvertFrom-Json
+    if ($null -eq $projectsPayload.projects) { throw 'Team ESMI projects source does not contain a projects array.' }
+
+    $currentRead = Read-BoardOrderFile -Path $orderPath
+    if ($currentRead.exists -and -not $currentRead.valid) { throw 'Shared board order is malformed. Repair it before saving a card move.' }
+    $currentOrderRevision = if ($currentRead.valid) { Get-BoardOrderRevisionFromPayload -Payload $currentRead.payload } else { 0 }
+    if ($expectedBoardOrderRevision -ne $currentOrderRevision) {
+      throw "Card move board order revision is stale. Expected $expectedBoardOrderRevision but the canonical revision is $currentOrderRevision."
+    }
+
+    $base = Get-BoardOrderReconciledLanes -Projects @($projectsPayload.projects) -OrderPayload $(if ($currentRead.valid) { $currentRead.payload } else { $null })
+    if (-not $base.projectStatusById.ContainsKey($cardId)) { throw "Unknown project ID '$cardId'." }
+    $actualLane = [string]$base.projectStatusById[$cardId]
+    if ($actualLane -ne $fromLane) { throw "Card '$cardId' is currently in '$actualLane', not '$fromLane'." }
+    $previousIndex = [array]::IndexOf([string[]]$base.lanes[$fromLane], $cardId)
+    if ($previousIndex -lt 0) { throw "Card '$cardId' is not present in its source lane order." }
+
+    $nextLanes = New-BoardOrderLaneMap
+    foreach ($lane in $laneKeys) {
+      $kept = New-Object 'System.Collections.Generic.List[string]'
+      foreach ($id in @($base.lanes[$lane])) {
+        if ([string]$id -ne $cardId) { [void]$kept.Add([string]$id) }
+      }
+      $nextLanes[$lane] = $kept.ToArray()
+    }
+    $availableDestinationSlots = @($nextLanes[$toLane]).Count
+    if ($toIndex -gt $availableDestinationSlots) {
+      throw "Card move destination index $toIndex is outside the '$toLane' lane (0-$availableDestinationSlots)."
+    }
+    $destination = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($id in @($nextLanes[$toLane])) { [void]$destination.Add([string]$id) }
+    $destination.Insert($toIndex, $cardId)
+    $nextLanes[$toLane] = $destination.ToArray()
+
+    $movedCard = $null
+    foreach ($candidate in @($projectsPayload.projects)) {
+      if ([string]$candidate.id -eq $cardId) { $movedCard = $candidate; break }
+    }
+    if ($null -eq $movedCard) { throw "Unknown project ID '$cardId'." }
+    $movedCard.status = $toLane
+    if ($null -eq $projectsPayload.meta) { $projectsPayload | Add-Member -NotePropertyName meta -NotePropertyValue ([pscustomobject]@{}) -Force }
+    $updatedAt = (Get-Date).ToString('o')
+    if ($projectsPayload.meta.PSObject.Properties.Name -contains 'saved') { $projectsPayload.meta.saved = $updatedAt }
+    else { $projectsPayload.meta | Add-Member -NotePropertyName saved -NotePropertyValue $updatedAt -Force }
+
+    $changeId = [Guid]::NewGuid().ToString()
+    $orderRecord = [ordered]@{
+      schemaVersion = 1
+      revision = $currentOrderRevision + 1
+      updatedAt = $updatedAt
+      updatedBySession = $sessionId
+      changeId = $changeId
+      lanes = $nextLanes
+    }
+    $projectsJson = $projectsPayload | ConvertTo-Json -Depth 30
+    $orderJson = $orderRecord | ConvertTo-Json -Depth 10
+    $projectsTemp = $null
+    $orderTemp = $null
+    $replacedPaths = New-Object 'System.Collections.Generic.List[string]'
+    $orderPreviouslyExists = $currentRead.exists
+    $orderPreviousText = if ($orderPreviouslyExists) { [System.IO.File]::ReadAllText($orderPath, [System.Text.Encoding]::UTF8) } else { '' }
+    try {
+      $projectsTemp = New-ValidatedTransactionFile -Destination $projectsPath -Text ($projectsJson + [Environment]::NewLine) -Label 'projects.json'
+      $orderTemp = New-ValidatedTransactionFile -Destination $orderPath -Text ($orderJson + [Environment]::NewLine) -Label 'board_order.json'
+      $orderCheck = Get-Content -LiteralPath $orderTemp -Raw | ConvertFrom-Json
+      if ($null -eq $orderCheck.lanes -or [int]$orderCheck.revision -ne ($currentOrderRevision + 1)) { throw 'Prepared board_order.json failed transaction validation.' }
+      $projectsCheck = Get-Content -LiteralPath $projectsTemp -Raw | ConvertFrom-Json
+      if ($null -eq $projectsCheck.projects) { throw 'Prepared projects.json failed transaction validation.' }
+
+      Backup-Once -Path $projectsPath
+      Backup-Once -Path $orderPath
+      Replace-PreparedTransactionFile -TempPath $projectsTemp -Destination $projectsPath
+      $projectsTemp = $null
+      [void]$replacedPaths.Add($projectsPath)
+      Replace-PreparedTransactionFile -TempPath $orderTemp -Destination $orderPath
+      $orderTemp = $null
+      [void]$replacedPaths.Add($orderPath)
+
+      $finalProjectsInfo = Get-FileRevisionInfo -Path $projectsPath
+      $auditEvent = [ordered]@{
+        timestamp = $updatedAt
+        cardId = $cardId
+        action = 'card_moved'
+        updatedBy = $sessionId
+        actor = $sessionId
+        previousLane = $fromLane
+        newLane = $toLane
+        fromLane = $fromLane
+        toLane = $toLane
+        previousIndex = $previousIndex
+        newIndex = $toIndex
+        projectRevision = [string]$finalProjectsInfo.lastWriteUtc
+        boardOrderRevision = $orderRecord.revision
+        changeId = $changeId
+        boardOrderChangeId = $changeId
+      }
+      Backup-Once -Path $auditPath
+      Append-AuditEvent -Body ($auditEvent | ConvertTo-Json -Depth 20 -Compress) -AuditPaths @($auditPath)
+    } catch {
+      $transactionError = $_.Exception.Message
+      foreach ($path in @($orderPath, $projectsPath)) {
+        if ($replacedPaths.Contains($path)) {
+          if ($path -eq $projectsPath) { Restore-TransactionFile -Path $path -PreviouslyExists $true -PreviousText $projectsText }
+          else { Restore-TransactionFile -Path $path -PreviouslyExists $orderPreviouslyExists -PreviousText $orderPreviousText }
+        }
+      }
+      throw "Card move transaction failed and was rolled back: $transactionError"
+    } finally {
+      foreach ($temp in @($projectsTemp, $orderTemp)) {
+        if ($temp -and (Test-Path -LiteralPath $temp -PathType Leaf)) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+      }
+    }
+
+    $runtimeProjectsCopied = $false
+    $runtimeOrderCopied = $false
+    $runtimeAuditCopied = $false
+    $runtimeWarning = ''
+    try {
+      $runtimeProjectsCopied = Copy-CanonicalFileToRuntime -CanonicalPath $projectsPath -RuntimePath $runtimeProjectsPath -Label 'projects.json'
+      $runtimeOrderCopied = Copy-CanonicalFileToRuntime -CanonicalPath $orderPath -RuntimePath $runtimeOrderPath -Label 'board_order.json'
+      $runtimeAuditCopied = Copy-CanonicalFileToRuntime -CanonicalPath $auditPath -RuntimePath $runtimeAuditPath -Label 'card_updates.jsonl'
+    } catch {
+      $runtimeWarning = $_.Exception.Message
+      Write-ServerLog "WARNING: card move canonical transaction committed but runtime mirror refresh failed: $runtimeWarning"
+    }
+
+    $finalProjectsInfo = Get-FileRevisionInfo -Path $projectsPath
+    $finalOrderInfo = Get-FileRevisionInfo -Path $orderPath
+    $state = Get-BoardOrderState
+    $syncState = Get-BoardOrderSyncState
+    return [ordered]@{
+      ok = $true
+      committed = $true
+      cardId = $cardId
+      fromLane = $fromLane
+      toLane = $toLane
+      previousIndex = $previousIndex
+      newIndex = $toIndex
+      projectRevision = [string]$finalProjectsInfo.lastWriteUtc
+      projectsRevision = [string]$finalProjectsInfo.lastWriteUtc
+      boardOrderRevision = [int]$state.revision
+      orderRevision = [int]$state.revision
+      changeId = $changeId
+      orderState = $state
+      syncState = $syncState
+      runtimeProjectsCopied = [bool]$runtimeProjectsCopied
+      runtimeOrderCopied = [bool]$runtimeOrderCopied
+      runtimeAuditCopied = [bool]$runtimeAuditCopied
+      runtimeWarning = $runtimeWarning
+      finalProjectsHash = [string]$finalProjectsInfo.hash
+      finalBoardOrderHash = [string]$finalOrderInfo.hash
+    }
+  } finally {
+    if ($lockStream) { $lockStream.Dispose() }
+  }
 }
 
 function Get-CardConflictKey {
@@ -1117,6 +1392,7 @@ function Get-CanonicalFileStatus {
   $revision = Get-FileRevisionInfo -Path $Path
   return @{
     path = $Path
+    exists = [bool]$revision.exists
     readable = [bool]$revision.exists
     writable = Test-FileWritableWithoutChange -Path $Path
     timestamp = $revision.lastWriteUtc
@@ -1219,8 +1495,8 @@ function Append-AuditEvent {
 
   $event = $Body | ConvertFrom-Json
   if ([string]::IsNullOrWhiteSpace($event.timestamp) -or
-      ([string]$event.action -ne 'card_reordered' -and [string]::IsNullOrWhiteSpace($event.cardTitle))) {
-    throw "Audit event must include timestamp and cardTitle unless it is a card_reordered event."
+      ([string]$event.action -notin @('card_reordered', 'card_moved') -and [string]::IsNullOrWhiteSpace($event.cardTitle))) {
+    throw "Audit event must include timestamp and cardTitle unless it is a card_reordered or card_moved event."
   }
 
   $safe = Redact-AuditObject $event
@@ -1729,6 +2005,33 @@ try {
         $pathOnly = ($rawPath -split "\?")[0]
         $requestBody = Read-RequestBody -Stream $stream -Request $request -InitialBuffer $buffer -InitialRead $read
         try {
+          if ($pathOnly -eq "/api/card-move") {
+            [void](Update-TeamReachability)
+            $authorityConfigPath = if ($script:TeamReachable -and (Test-Path -LiteralPath $teamConfigPath -PathType Leaf)) { $teamConfigPath } else { $configPath }
+            Require-EditToken -Request $request -ConfigPath $authorityConfigPath
+            try {
+              $moveResult = Save-CardMove -Body $requestBody
+              Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload $moveResult
+              Write-ServerLog "200 POST $rawPath cardMoveChangeId=$($moveResult.changeId) boardOrderRevision=$($moveResult.boardOrderRevision)"
+            } catch {
+              if ($_.Exception.Message -match '^Card move (projects|board order) revision is stale') {
+                $conflictState = Get-CardMoveState
+                Send-Json -Stream $stream -StatusCode 409 -StatusText "Conflict" -Payload @{
+                  ok = $false
+                  error = 'The canonical board changed before this move was saved. The latest state has been loaded.'
+                  projectsRevision = $conflictState.projectsRevision
+                  boardOrderRevision = $conflictState.boardOrderRevision
+                  changeId = $conflictState.changeId
+                  orderState = $conflictState.orderState
+                  syncState = $conflictState.syncState
+                }
+                Write-ServerLog "409 POST $rawPath stale card move revision"
+              } else {
+                throw
+              }
+            }
+            continue
+          }
           if ($pathOnly -eq "/api/board-order") {
             [void](Update-TeamReachability)
             $authorityConfigPath = if ($script:TeamReachable -and (Test-Path -LiteralPath $teamConfigPath -PathType Leaf)) { $teamConfigPath } else { $configPath }
@@ -1813,7 +2116,7 @@ try {
           continue
       } catch {
         Write-ExceptionLog -Exception $_.Exception -Prefix "SAVE ERROR"
-          $status = if ($_.Exception.Message -match "locked|PIN") { 401 } elseif ($_.Exception.Message -match "source changed|Refresh the board|board order revision") { 409 } elseif ($_.Exception.Message -match "does not exist|was not found") { 404 } elseif ($_.Exception.Message -match "unreachable|unavailable") { 503 } elseif ($_.Exception.Message -match "Invalid|must be|required|outside the approved|does not match|Unknown board order|Unknown project ID|Duplicate project ID|Reordered card|project ID.*status|malformed") { 400 } else { 500 }
+          $status = if ($_.Exception.Message -match "locked|PIN") { 401 } elseif ($_.Exception.Message -match "source changed|Refresh the board|board order revision|card move.*stale|Card move transaction is busy") { 409 } elseif ($_.Exception.Message -match "does not exist|was not found") { 404 } elseif ($_.Exception.Message -match "unreachable|unavailable") { 503 } elseif ($_.Exception.Message -match "Invalid|must be|required|outside the approved|does not match|Unknown board order|Unknown project ID|Duplicate project ID|Reordered card|project ID.*status|malformed|source lane|destination lane|destination index|Card move") { 400 } else { 500 }
           $statusText = if ($status -eq 400) { "Bad Request" } elseif ($status -eq 401) { "Unauthorized" } elseif ($status -eq 404) { "Not Found" } elseif ($status -eq 409) { "Conflict" } elseif ($status -eq 503) { "Service Unavailable" } else { "Save Failed" }
           Send-Json -Stream $stream -StatusCode $status -StatusText $statusText -Payload @{ ok = $false; error = $_.Exception.Message }
           continue

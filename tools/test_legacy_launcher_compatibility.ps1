@@ -87,7 +87,7 @@ try {
       if (-not (Test-Path -LiteralPath (Join-Path $RuntimeRoot $relative) -PathType Leaf)) { throw "Runtime file missing: $relative" }
     }
     $runtimeVersion = (Get-Content -LiteralPath (Join-Path $RuntimeRoot 'data\app_version.json') -Raw | ConvertFrom-Json).version
-    if ($runtimeVersion -ne '2026.08.03.101550') { throw "Runtime version did not refresh: $runtimeVersion" }
+    if ($runtimeVersion -ne '2026.08.03.122015') { throw "Runtime version did not refresh: $runtimeVersion" }
 
     Write-Output 'LEGACY_LAUNCHER_COMPATIBILITY_OK'
     Write-Output "LEGACY_RUNTIME_MODE=$($health.mode)"

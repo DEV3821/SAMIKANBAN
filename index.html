@@ -378,9 +378,34 @@
     box-shadow: 0 4px 12px rgba(17,24,39,0.06);
     transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
   }
+  .card[aria-drag-enabled="true"] { cursor: grab; }
+  .card[aria-drag-enabled="true"] .title,
+  .card[aria-drag-enabled="true"] .context,
+  .card[aria-drag-enabled="true"] .next-step,
+  .card[aria-drag-enabled="true"] .card-activity-line { cursor: grab; }
+  .card[aria-drag-enabled="true"]:active { cursor: grabbing; }
   .card:hover { box-shadow: 0 10px 24px rgba(0,94,184,0.13); transform: translateY(-1px); }
-  .card.dragging { opacity: 0.58; transform: rotate(0.4deg); }
+  .card.dragging { opacity: 0.18; transform: none; }
+  .card.drag-source { display: none !important; }
   .card.order-drop-target { outline: 2px solid color-mix(in srgb, var(--sa-cyan) 70%, transparent); outline-offset: 3px; }
+  .order-drag-placeholder {
+    min-height: 4rem;
+    margin-bottom: 0.55rem;
+    border: 2px dashed color-mix(in srgb, var(--sa-cyan) 75%, var(--line));
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--sa-cyan) 9%, transparent);
+    box-sizing: border-box;
+  }
+  .order-drag-ghost {
+    position: fixed;
+    z-index: 10000;
+    pointer-events: none;
+    margin: 0;
+    opacity: 0.94;
+    transform: rotate(0.6deg) scale(1.015);
+    box-shadow: 0 18px 42px rgba(0, 49, 92, 0.28);
+    transition: none !important;
+  }
   .order-drag-handle {
     align-self: stretch;
     min-width: 1.65rem;
@@ -404,6 +429,8 @@
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--sa-cyan) 20%, transparent);
   }
   .column.order-drag-over { border-color: color-mix(in srgb, var(--sa-cyan) 68%, var(--line)); }
+  .column.order-drag-over.order-drop-valid { box-shadow: 0 0 0 3px color-mix(in srgb, var(--sa-cyan) 22%, transparent); }
+  .column.order-drop-invalid { border-color: color-mix(in srgb, var(--status-blocked) 72%, var(--line)); opacity: 0.76; }
   .card.s-backlog { border-left-color: var(--status-backlog); }
   .card.s-running { border-left-color: var(--status-in-progress); }
   .card.s-blocked { border-left-color: var(--status-blocked); }
@@ -2465,6 +2492,10 @@ const SYNC_FAST_POLL_MS = 2000;
 const SYNC_HIDDEN_POLL_MS = 10000;
 const REMOTE_NOTIFY_COALESCE_MS = 3000;
 const CLIENT_SESSION_STORAGE_KEY = "samiKanbanClientSession";
+const DRAG_HOLD_MS = 190;
+const DRAG_MOVE_THRESHOLD_PX = 6;
+const AUTO_SCROLL_EDGE_PX = 90;
+const AUTO_SCROLL_MAX_PX = 22;
 let appState = {
   payload: null,
   projects: [],
@@ -2484,10 +2515,16 @@ let appState = {
   searchQuery: "",
   editingIndex: -1,
   boardOrder: { loaded: false, canonicalAvailable: false, exists: false, valid: true, revision: 0, updatedAt: "", updatedBySession: "", changeId: "", signature: "", lanes: { backlog: [], running: [], blocked: [], done: [] }, warnings: [] },
-  reorder: { active: false, cardId: "", lane: "", priorLanes: null, pending: false, marker: null },
+  reorder: {
+    active: false, phase: "idle", cardId: "", lane: "", targetLane: "", targetBeforeId: "", targetIndex: -1,
+    priorLanes: null, priorPayloadProjects: null, pending: false, marker: null, placeholder: null, ghost: null,
+    pointerId: null, startX: 0, startY: 0, lastX: 0, lastY: 0, offsetX: 0, offsetY: 0, holdTimer: null,
+    suppressClick: false, crossLaneAnnounced: false,
+    autoScroll: { active: false, raf: 0, directionX: 0, directionY: 0, speedX: 0, speedY: 0, lane: "" }
+  },
   soundReady: false,
   soundMetrics: { localChimes: 0, remoteChimes: 0 },
-  remoteNotifications: { count: 0, orderChanged: false, projectChanged: false, timer: null, seen: new Set() },
+  remoteNotifications: { count: 0, total: 0, orderChanged: false, projectChanged: false, timer: null, seen: new Set() },
   reviewQueue: [],
   reviewIndex: 0,
   reviewStats: null,
@@ -2501,7 +2538,7 @@ let appState = {
   sync: {
     projectsRevision: "", projectsSignature: "", auditRevision: "", auditSignature: "", pending: null, timer: null, countdownTimer: null, lastStatus: null, lastState: null, stateInitialized: false, lastError: "", lastSuccessMessage: "",
     lastSyncStartedAt: null, lastSyncSucceededAt: null, lastSyncFailedAt: null, nextSyncDueAt: null,
-    isEditing: false, teamReachable: null, syncInFlight: false, ownBoardOrderChangeId: "", ownProjectsSignature: ""
+    isEditing: false, teamReachable: null, syncInFlight: false, ownBoardOrderChangeId: "", ownProjectsSignature: "", lastChangeId: ""
   }
 };
 let splashReady = false;
@@ -2530,11 +2567,37 @@ function getClientSessionId() {
   let id = "";
   try { id = sessionStorage.getItem(CLIENT_SESSION_STORAGE_KEY) || ""; } catch (_) {}
   if (!id) {
+    const requested = new URLSearchParams(location.search).get("samiSessionId") || "";
+    if (/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(requested)) id = requested;
+  }
+  if (!id) {
     try { id = crypto.randomUUID ? crypto.randomUUID() : "session-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2); }
     catch (_) { id = "session-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2); }
     try { sessionStorage.setItem(CLIENT_SESSION_STORAGE_KEY, id); } catch (_) {}
   }
   return id;
+}
+
+function applyFixtureIdentity() {
+  const label = new URLSearchParams(location.search).get("samiClientLabel") || "";
+  if (label && /^[A-Za-z0-9 _-]{1,32}$/.test(label)) document.title = "SAMI Project Portfolio - " + label;
+}
+
+async function autoUnlockFixtureForTest() {
+  const params = new URLSearchParams(location.search);
+  if (!params.has("samiTest") || params.get("samiAutoUnlock") !== "1") return;
+  try {
+    const response = await fetch("api/unlock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ pin: "" })
+    });
+    const payload = await response.json();
+    if (response.ok && payload && payload.ok !== false) {
+      setEditSession(payload.token, payload.expires);
+      render(appState.projects, appState.meta, { skipAsyncRefresh: true });
+    }
+  } catch (_) {}
 }
 
 function announceBoard(message) {
@@ -2655,6 +2718,7 @@ function flushRemoteNotifications() {
   pending.orderChanged = false;
   pending.projectChanged = false;
   pending.timer = null;
+  pending.total++;
   let message = "A portfolio update was received.";
   if (count > 1) message = count + " portfolio updates were received.";
   else if (orderChanged && !projectChanged) message = "Card order was updated by another user.";
@@ -2668,6 +2732,9 @@ function flushRemoteNotifications() {
 
 function queueRemoteNotification(state, changes) {
   if (!state || !changes) return;
+  const isOwnOrderChange = !!(appState.sync.ownBoardOrderChangeId && state.boardOrderChangeId && String(state.boardOrderChangeId) === String(appState.sync.ownBoardOrderChangeId));
+  const isOwnProjectsChange = !!(appState.sync.ownProjectsSignature && state.projectsSignature && String(state.projectsSignature) === String(appState.sync.ownProjectsSignature));
+  if (isOwnOrderChange && (!changes.projectsChanged || isOwnProjectsChange)) return;
   const token = [state.projectsSignature || state.projectsRevision || "", state.boardOrderSignature || "", state.boardOrderChangeId || ""].join("|");
   if (!token || appState.remoteNotifications.seen.has(token)) return;
   appState.remoteNotifications.seen.add(token);
@@ -3431,6 +3498,7 @@ function applyBoardOrderState(state) {
     lanes: cloneBoardOrderLanes(source.lanes),
     warnings: warnings
   };
+  if (appState.sync) appState.sync.lastChangeId = String(source.changeId || appState.sync.lastChangeId || "");
 }
 
 async function fetchBoardOrder() {
@@ -3457,6 +3525,37 @@ async function loadBoardOrder(projects, options) {
     if (options && options.showWarning) showNotice(fallback.warnings[0], "error");
     return fallback;
   }
+}
+
+function domBoardOrder() {
+  const result = {};
+  COLS.forEach(col => {
+    const column = document.querySelector('.column[data-lane-key="' + CSS.escape(col.key) + '"]');
+    result[col.key] = column ? Array.from(column.querySelectorAll('.card[data-card-id]')).map(card => String(card.getAttribute('data-card-id'))) : [];
+  });
+  return result;
+}
+
+function canonicalVisibleBoardOrder(orderState, projects) {
+  const normalized = (projects || []).map((card, index) => normalizeCard(Object.assign({}, card), index));
+  const byId = new Map(normalized.filter(card => card && card.id).map(card => [String(card.id), card]));
+  const expected = { backlog: [], running: [], blocked: [], done: [] };
+  const searchActive = normalizedSearchValue(appState.searchQuery).trim().length > 0;
+  COLS.forEach(col => {
+    const ids = orderState && orderState.lanes ? orderState.lanes[col.key] : [];
+    (Array.isArray(ids) ? ids : []).forEach(id => {
+      const card = byId.get(String(id));
+      if (card && card.status === col.key && (!searchActive || cardMatchesSearch(card, appState.searchQuery))) expected[col.key].push(String(card.id));
+    });
+  });
+  return expected;
+}
+
+function verifyRenderedBoardOrder(orderState, projects) {
+  const actual = domBoardOrder();
+  const expected = canonicalVisibleBoardOrder(orderState, projects);
+  const mismatches = COLS.filter(col => JSON.stringify(actual[col.key] || []) !== JSON.stringify(expected[col.key] || [])).map(col => col.key);
+  return { ok: mismatches.length === 0, actual: actual, expected: expected, mismatches: mismatches };
 }
 
 function orderedProjectsForBoard(projects) {
@@ -3504,7 +3603,7 @@ function boardSearchOrFilterActive() {
 function reorderDisabledReason() {
   if (!appState.editingUnlocked) return "Unlock editing to reorder cards.";
   if (!appState.sync.teamReachable) return "Team ESMI is unavailable; shared reordering is disabled.";
-  if (boardSearchOrFilterActive()) return "Clear search and filters to reorder cards.";
+  if (boardSearchOrFilterActive()) return "Clear search and filters to move or reorder cards.";
   if (!appState.boardOrder.loaded) return "Shared board order is still loading.";
   if (appState.saving || appState.reorder.pending) return "A save is already in progress.";
   return "";
@@ -3528,7 +3627,7 @@ function renderOrderHandleState() {
   const reason = reorderDisabledReason();
   document.querySelectorAll("[data-order-handle]").forEach(handle => {
     handle.setAttribute("aria-disabled", reason ? "true" : "false");
-    handle.title = reason || "Drag to reorder within this lane. Alt+Up or Alt+Down also moves this card.";
+    handle.title = reason || "Click and hold this cue or any safe card surface to move. Alt+Up/Down reorders; Alt+Left/Right changes lane.";
   });
 }
 
@@ -3537,42 +3636,170 @@ function removeOrderMarker() {
   if (marker && marker.parentNode) marker.parentNode.removeChild(marker);
   appState.reorder.marker = null;
   document.querySelectorAll(".column.order-drag-over").forEach(column => column.classList.remove("order-drag-over"));
+  document.querySelectorAll(".column.order-drop-valid, .column.order-drop-invalid").forEach(column => column.classList.remove("order-drop-valid", "order-drop-invalid"));
   document.querySelectorAll(".card.order-drop-target").forEach(card => card.classList.remove("order-drop-target"));
 }
 
-function clearOrderDragState() {
+function stopDragAutoScroll() {
+  const scroll = appState.reorder.autoScroll;
+  scroll.active = false;
+  scroll.directionX = 0;
+  scroll.directionY = 0;
+  scroll.speedX = 0;
+  scroll.speedY = 0;
+  scroll.lane = "";
+  if (scroll.raf) window.cancelAnimationFrame(scroll.raf);
+  scroll.raf = 0;
+}
+
+function removeDragPlaceholder() {
+  const placeholder = appState.reorder.placeholder;
+  if (placeholder && placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
+  appState.reorder.placeholder = null;
+}
+
+function clearOrderDragState(options) {
+  if (appState.reorder.holdTimer) window.clearTimeout(appState.reorder.holdTimer);
+  appState.reorder.holdTimer = null;
+  stopDragAutoScroll();
   removeOrderMarker();
+  removeDragPlaceholder();
+  if (appState.reorder.ghost && appState.reorder.ghost.parentNode) appState.reorder.ghost.parentNode.removeChild(appState.reorder.ghost);
+  appState.reorder.ghost = null;
   document.querySelectorAll(".card.dragging").forEach(card => card.classList.remove("dragging"));
+  document.querySelectorAll(".card.drag-source").forEach(card => { card.classList.remove("drag-source"); card.style.display = ""; });
   appState.reorder.active = false;
+  appState.reorder.phase = "idle";
   appState.reorder.cardId = "";
   appState.reorder.lane = "";
+  appState.reorder.targetLane = "";
   appState.reorder.targetBeforeId = "";
+  appState.reorder.targetIndex = -1;
+  appState.reorder.pointerId = null;
+  appState.reorder.priorLanes = null;
+  appState.reorder.priorPayloadProjects = null;
+  if (!(options && options.keepClickSuppressed)) appState.reorder.suppressClick = false;
 }
 
 function setOrderInsertionMarker(column, beforeCard) {
   removeOrderMarker();
+  if (!column) return;
+  const placeholder = appState.reorder.placeholder;
+  if (placeholder) {
+    if (beforeCard && beforeCard.parentNode === column && beforeCard !== placeholder) column.insertBefore(placeholder, beforeCard);
+    else if (!beforeCard) column.appendChild(placeholder);
+  }
   const marker = document.createElement("div");
   marker.className = "order-insertion-marker";
   marker.setAttribute("aria-hidden", "true");
   if (beforeCard) {
-    beforeCard.parentNode.insertBefore(marker, beforeCard);
+    if (placeholder && placeholder.parentNode === column) column.insertBefore(marker, placeholder);
+    else beforeCard.parentNode.insertBefore(marker, beforeCard);
     beforeCard.classList.add("order-drop-target");
     appState.reorder.targetBeforeId = beforeCard.getAttribute("data-card-id") || "";
   } else {
-    column.appendChild(marker);
+    if (placeholder && placeholder.parentNode === column) column.appendChild(marker);
+    else column.appendChild(marker);
     appState.reorder.targetBeforeId = "";
   }
   appState.reorder.marker = marker;
+  appState.reorder.targetLane = column.getAttribute("data-lane-key") || "";
+  const cards = Array.from(column.querySelectorAll(".card[data-card-id]")).filter(card => card.getAttribute("data-card-id") !== appState.reorder.cardId);
+  appState.reorder.targetIndex = beforeCard ? Math.max(0, cards.indexOf(beforeCard)) : cards.length;
   column.classList.add("order-drag-over");
+  column.classList.add("order-drop-valid");
 }
 
 function dragBeforeCard(column, clientY, draggedId) {
-  const cards = Array.from(column.querySelectorAll(".card")).filter(card => card.getAttribute("data-card-id") !== draggedId);
+  const cards = Array.from(column.querySelectorAll(".card[data-card-id]")).filter(card => card.getAttribute("data-card-id") !== draggedId && !card.classList.contains("drag-source"));
   for (const card of cards) {
     const rect = card.getBoundingClientRect();
     if (clientY < rect.top + rect.height / 2) return card;
   }
   return null;
+}
+
+function isInteractiveDragTarget(target) {
+  if (!target || !target.closest) return false;
+  return !!target.closest("button, a, input, select, textarea, option, label, [contenteditable=\"true\"], [data-edit-required], [data-project-context], [data-copy-context], [data-folder], [data-details], [data-review-action], .card-details-panel, .file-visibility");
+}
+
+function scrollableAncestorForPoint(clientX, clientY) {
+  const element = document.elementFromPoint(clientX, clientY);
+  let node = element && element.closest ? element.closest(".column") : null;
+  while (node && node !== document.body) {
+    if (node.scrollHeight > node.clientHeight + 2) {
+      const style = window.getComputedStyle(node);
+      if (/(auto|scroll|overlay)/.test(style.overflowY)) return node;
+    }
+    node = node.parentElement;
+  }
+  return null;
+}
+
+function edgeScrollSpeed(position, size) {
+  if (position < AUTO_SCROLL_EDGE_PX) {
+    const intensity = Math.max(0, Math.min(1, (AUTO_SCROLL_EDGE_PX - position) / AUTO_SCROLL_EDGE_PX));
+    return -Math.max(2, Math.round(AUTO_SCROLL_MAX_PX * intensity * intensity));
+  }
+  if (position > size - AUTO_SCROLL_EDGE_PX) {
+    const intensity = Math.max(0, Math.min(1, (position - (size - AUTO_SCROLL_EDGE_PX)) / AUTO_SCROLL_EDGE_PX));
+    return Math.max(2, Math.round(AUTO_SCROLL_MAX_PX * intensity * intensity));
+  }
+  return 0;
+}
+
+function updateAutoScrollForPointer(clientX, clientY) {
+  const scroll = appState.reorder.autoScroll;
+  const width = window.innerWidth || document.documentElement.clientWidth || 0;
+  const height = window.innerHeight || document.documentElement.clientHeight || 0;
+  const nextY = edgeScrollSpeed(clientY, height);
+  const nextX = edgeScrollSpeed(clientX, width);
+  scroll.directionX = nextX === 0 ? 0 : (nextX < 0 ? -1 : 1);
+  scroll.directionY = nextY === 0 ? 0 : (nextY < 0 ? -1 : 1);
+  scroll.speedX = Math.abs(nextX);
+  scroll.speedY = Math.abs(nextY);
+  const lane = document.elementFromPoint(clientX, clientY)?.closest?.(".column");
+  scroll.lane = lane ? lane.getAttribute("data-lane-key") || "" : "";
+  const shouldScroll = !!(nextX || nextY);
+  if (!shouldScroll) {
+    stopDragAutoScroll();
+    return;
+  }
+  scroll.active = true;
+  if (!scroll.raf) scroll.raf = window.requestAnimationFrame(runDragAutoScroll);
+}
+
+function runDragAutoScroll() {
+  const scroll = appState.reorder.autoScroll;
+  scroll.raf = 0;
+  if (!appState.reorder.active || !scroll.active) return;
+  const lane = scroll.lane ? document.querySelector('.column[data-lane-key="' + CSS.escape(scroll.lane) + '"]') : null;
+  const target = lane && lane.scrollHeight > lane.clientHeight + 2 ? lane : null;
+  if (target && scroll.directionY) target.scrollTop += scroll.directionY * scroll.speedY;
+  else if (scroll.directionY) window.scrollBy(0, scroll.directionY * scroll.speedY);
+  if (scroll.directionX) window.scrollBy(scroll.directionX * scroll.speedX, 0);
+  updateDragTargetAt(appState.reorder.lastX, appState.reorder.lastY);
+  if (appState.reorder.active && scroll.active) scroll.raf = window.requestAnimationFrame(runDragAutoScroll);
+}
+
+function updateDragTargetAt(clientX, clientY) {
+  if (!appState.reorder.active) return;
+  appState.reorder.lastX = clientX;
+  appState.reorder.lastY = clientY;
+  const element = document.elementFromPoint(clientX, clientY);
+  const column = element && element.closest ? element.closest(".column") : null;
+  document.querySelectorAll(".column.order-drop-invalid").forEach(item => item.classList.remove("order-drop-invalid"));
+  if (!column || !COLS.some(col => col.key === column.getAttribute("data-lane-key"))) {
+    removeOrderMarker();
+    appState.reorder.targetLane = "";
+    appState.reorder.targetIndex = -1;
+    document.querySelectorAll(".column").forEach(item => item.classList.add("order-drop-invalid"));
+    return;
+  }
+  const beforeCard = dragBeforeCard(column, clientY, appState.reorder.cardId);
+  setOrderInsertionMarker(column, beforeCard);
+  updateAutoScrollForPointer(clientX, clientY);
 }
 
 function reorderLanesWithMove(lanes, lane, cardId, beforeId) {
@@ -3584,6 +3811,96 @@ function reorderLanesWithMove(lanes, lane, cardId, beforeId) {
   without.splice(index, 0, String(cardId));
   next[lane] = without;
   return next;
+}
+
+function moveLanesWithMove(lanes, fromLane, toLane, cardId, toIndex) {
+  const next = cloneBoardOrderLanes(lanes);
+  COLS.forEach(col => { next[col.key] = next[col.key].filter(id => String(id) !== String(cardId)); });
+  const destination = NewArrayFrom(next[toLane]);
+  const index = Math.max(0, Math.min(Number(toIndex), destination.length));
+  destination.splice(index, 0, String(cardId));
+  next[toLane] = destination;
+  return next;
+}
+
+function NewArrayFrom(value) {
+  return Array.isArray(value) ? value.map(String) : [];
+}
+
+function cloneProjectList(projects) {
+  try { return JSON.parse(JSON.stringify(Array.isArray(projects) ? projects : [])); }
+  catch (_) { return (projects || []).map(project => Object.assign({}, project)); }
+}
+
+function applyOptimisticCardMove(cardId, toLane) {
+  const projects = appState.payload && Array.isArray(appState.payload.projects) ? appState.payload.projects : appState.projects;
+  const card = (projects || []).find(item => String(item.id) === String(cardId));
+  if (!card) return false;
+  card.status = toLane;
+  return true;
+}
+
+function restoreOptimisticCardMove(previousLanes, previousProjects) {
+  if (appState.payload) appState.payload.projects = cloneProjectList(previousProjects);
+  appState.boardOrder.lanes = cloneBoardOrderLanes(previousLanes);
+  render(appState.payload ? appState.payload.projects : appState.projects, appState.meta, { skipAsyncRefresh: true });
+}
+
+async function submitCardMove(cardId, fromLane, toLane, toIndex, options) {
+  const previousLanes = cloneBoardOrderLanes(currentBoardOrderLanes());
+  const previousProjects = cloneProjectList(appState.payload && appState.payload.projects ? appState.payload.projects : appState.projects);
+  const previousState = { revision: Number(appState.boardOrder.revision || 0), projectsRevision: String(appState.sync.projectsRevision || "") };
+  const nextLanes = moveLanesWithMove(previousLanes, fromLane, toLane, cardId, toIndex);
+  if (!applyOptimisticCardMove(cardId, toLane)) return false;
+  appState.boardOrder.lanes = cloneBoardOrderLanes(nextLanes);
+  appState.reorder.pending = true;
+  render(appState.payload ? appState.payload.projects : appState.projects, appState.meta, { skipAsyncRefresh: true });
+  const optimisticCheck = verifyRenderedBoardOrder(appState.boardOrder, appState.payload ? appState.payload.projects : appState.projects);
+  if (!optimisticCheck.ok) {
+    restoreOptimisticCardMove(previousLanes, previousProjects);
+    appState.reorder.pending = false;
+    updateEditState();
+    showNotice("Card move could not be rendered; the previous state was restored.", "error");
+    return false;
+  }
+  const body = {
+    cardId: String(cardId),
+    fromLane: String(fromLane),
+    toLane: String(toLane),
+    toIndex: Number(toIndex),
+    expectedProjectsRevision: previousState.projectsRevision,
+    expectedBoardOrderRevision: previousState.revision,
+    clientSessionId: getClientSessionId()
+  };
+  try {
+    const response = await postJson("api/card-move", body);
+    if (response.orderState) applyBoardOrderState(response.orderState);
+    if (response.syncState) rememberSyncState(response.syncState, true);
+    appState.sync.ownBoardOrderChangeId = String(response.changeId || appState.boardOrder.changeId || "");
+    appState.sync.lastChangeId = String(response.changeId || appState.sync.lastChangeId || "");
+    if (response.projectsRevision) appState.sync.projectsRevision = String(response.projectsRevision);
+    render(appState.payload ? appState.payload.projects : appState.projects, appState.meta, { skipAsyncRefresh: true });
+    const finalCheck = verifyRenderedBoardOrder(response.orderState || appState.boardOrder, appState.payload ? appState.payload.projects : appState.projects);
+    if (!finalCheck.ok) throw new Error("The saved card move could not be reconciled to the visible board.");
+    onManualOrderSaveSuccess(orderCardById(cardId), options && options.successMessage || "Card moved and status updated.");
+    return true;
+  } catch (err) {
+    restoreOptimisticCardMove(previousLanes, previousProjects);
+    if (err.status === 409) {
+      try { await loadLatestProjectsFromServer(null); } catch (_) {}
+      const message = "The board changed while the card was moving. The latest canonical state has been loaded.";
+      showNotice(message, "error");
+      announceBoard(message);
+    } else {
+      const message = "Card move failed; the previous lane, position and status were restored: " + err.message;
+      showNotice(message, "error");
+      announceBoard(message);
+    }
+    return false;
+  } finally {
+    appState.reorder.pending = false;
+    updateEditState();
+  }
 }
 
 async function submitBoardOrder(nextLanes, options) {
@@ -3604,7 +3921,10 @@ async function submitBoardOrder(nextLanes, options) {
     if (response.orderState) applyBoardOrderState(response.orderState);
     if (response.syncState) rememberSyncState(response.syncState, true);
     appState.sync.ownBoardOrderChangeId = String(response.changeId || appState.boardOrder.changeId || "");
+    appState.sync.lastChangeId = String(response.changeId || appState.sync.lastChangeId || "");
     render(appState.projects, appState.meta, { skipAsyncRefresh: true });
+    const finalCheck = verifyRenderedBoardOrder(response.orderState || appState.boardOrder, appState.projects);
+    if (!finalCheck.ok) throw new Error("The saved board order could not be reconciled to the visible board.");
     const card = orderCardById(options && options.movedCardId);
     if (!options || options.localFeedback !== false) onManualOrderSaveSuccess(card, options && options.successMessage || "Card order saved");
     else announceBoard(options.successMessage || "Card status updated and lane order saved.");
@@ -3659,6 +3979,18 @@ async function moveCardByKeyboard(id, direction) {
   const lanes = currentBoardOrderLanes();
   const lane = COLS.map(col => col.key).find(key => lanes[key].some(value => String(value) === String(id)));
   if (!lane) return;
+  if (direction === "previous-lane" || direction === "next-lane") {
+    const laneIndex = COLS.findIndex(col => col.key === lane);
+    const targetLaneIndex = laneIndex + (direction === "previous-lane" ? -1 : 1);
+    if (targetLaneIndex < 0 || targetLaneIndex >= COLS.length) {
+      announceBoard("Card is already in the outermost workflow lane.");
+      return;
+    }
+    const toLane = COLS[targetLaneIndex].key;
+    const saved = await submitCardMove(id, lane, toLane, lanes[toLane].length, { successMessage: "Card moved to " + STATUS_LABELS[toLane] + "." });
+    if (saved) focusOrderHandle(id);
+    return;
+  }
   const index = lanes[lane].findIndex(value => String(value) === String(id));
   const target = index + direction;
   if (target < 0 || target >= lanes[lane].length) {
@@ -3676,9 +4008,13 @@ function installBoardOrderTestHooks() {
   if (!new URLSearchParams(location.search).has("samiTest")) return;
   window.__samiTestHooks = {
     getBoardOrder: () => JSON.parse(JSON.stringify(appState.boardOrder)),
+    getVisualOrder: () => JSON.parse(JSON.stringify(domBoardOrder())),
+    getRevisions: () => ({ projectsRevision: appState.sync.projectsRevision, boardOrderRevision: appState.boardOrder.revision, lastChangeId: appState.sync.lastChangeId || appState.boardOrder.changeId || "" }),
     getSyncState: () => JSON.parse(JSON.stringify({ teamReachable: appState.sync.teamReachable, lastState: appState.sync.lastState, pending: appState.sync.pending })),
     getSoundMetrics: () => Object.assign({}, appState.soundMetrics),
-    getRemoteNotificationState: () => ({ count: appState.remoteNotifications.count, queued: !!appState.remoteNotifications.timer }),
+    getRemoteNotificationState: () => ({ count: appState.remoteNotifications.total, queued: !!appState.remoteNotifications.timer }),
+    getDragState: () => ({ active: appState.reorder.active, phase: appState.reorder.phase, cardId: appState.reorder.cardId, lane: appState.reorder.lane, targetLane: appState.reorder.targetLane, targetIndex: appState.reorder.targetIndex, pending: appState.reorder.pending }),
+    getAutoScrollState: () => Object.assign({}, appState.reorder.autoScroll),
     markSoundReady: () => markSoundReady(),
     resetSoundMetrics: () => { appState.soundMetrics.localChimes = 0; appState.soundMetrics.remoteChimes = 0; },
     unlockForTest: async () => {
@@ -3861,6 +4197,7 @@ function rememberSyncState(state, markInitial) {
   appState.sync.lastState = normalized;
   appState.sync.stateInitialized = markInitial !== false;
   appState.sync.teamReachable = normalized.canonicalAvailable;
+  if (normalized.boardOrderChangeId) appState.sync.lastChangeId = normalized.boardOrderChangeId;
   if (Object.prototype.hasOwnProperty.call(state, "boardOrderSignature")) {
     appState.boardOrder.signature = normalized.boardOrderSignature;
   }
@@ -3973,7 +4310,10 @@ async function loadLatestProjectsFromServer(message) {
   const dataResp = await fetch("data/projects.json?ts=" + Date.now(), { cache: "no-store" });
   if (!dataResp.ok) throw new Error("HTTP " + dataResp.status);
   appState.payload = await dataResp.json();
-  rememberSyncStatus(status, message);
+  // Record health immediately for the indicator, but do not acknowledge this
+  // revision until canonical data, audit data, order, and the rendered DOM
+  // have all reconciled successfully below.
+  recordSyncCheck(status, null, message);
   scheduleNextSync(document.visibilityState === "visible" ? SYNC_FAST_POLL_MS : SYNC_HIDDEN_POLL_MS);
   await loadAuditUpdates();
   await loadBoardOrder(appState.payload.projects || [], { showWarning: false });
@@ -3995,19 +4335,33 @@ function restoreBoardViewState(view) {
    queues one coalesced notification for meaningful changes from another session. */
 async function refreshFromSharedSource(message, remoteChanges, remoteState) {
   const view = captureBoardViewState();
+  const previousState = appState.sync.lastState;
   const status = await fetchSyncStatus();
   const dataResp = await fetch("data/projects.json?ts=" + Date.now(), { cache: "no-store" });
   if (!dataResp.ok) throw new Error("HTTP " + dataResp.status);
-  appState.payload = await dataResp.json();
+  const nextPayload = await dataResp.json();
+  if (!nextPayload || !Array.isArray(nextPayload.projects)) throw new Error("Canonical projects payload is invalid.");
+  appState.payload = nextPayload;
   rememberSyncStatus(status, message);
   await loadAuditUpdates();
   const orderState = await loadBoardOrder(appState.payload.projects || [], { showWarning: false });
-  if (remoteState && orderState && remoteState.boardOrderSignature) appState.boardOrder.signature = remoteState.boardOrderSignature;
-  if (remoteState) rememberSyncState(remoteState, true);
   render(appState.payload.projects || [], appState.payload.meta || {});
+  const rendered = verifyRenderedBoardOrder(orderState, appState.payload.projects || []);
+  if (!rendered.ok) {
+    throw new Error("Canonical board order was fetched but the visible lanes did not reconcile: " + rendered.mismatches.join(", "));
+  }
+  const finalState = await fetchSyncState();
+  const orderFetchedSignature = String(orderState.boardOrderSignature || orderState.signature || "");
+  const stateOrderSignature = String(finalState.boardOrderSignature || "");
+  if (orderFetchedSignature && stateOrderSignature && orderFetchedSignature !== stateOrderSignature) {
+    throw new Error("The canonical board changed while it was being refreshed; retrying the bounded reconciliation.");
+  }
+  rememberSyncState(finalState, true);
+  appState.sync.lastChangeId = String(finalState.boardOrderChangeId || orderState.changeId || appState.sync.lastChangeId || "");
   renderReviewCurrent();
   restoreBoardViewState(view);
-  if (remoteChanges && remoteChanges.changed) queueRemoteNotification(remoteState, remoteChanges);
+  const changes = previousState ? syncStateChanged(previousState, finalState) : (remoteChanges || { changed: true, projectsChanged: true, orderChanged: true, auditChanged: false });
+  if (changes && changes.changed) queueRemoteNotification(finalState, changes);
 }
 async function applyPendingSync() {
   if (!appState.sync.pending) return;
@@ -4045,7 +4399,6 @@ async function pollSyncStatus() {
     const state = await fetchSyncState();
     const previous = appState.sync.lastState;
     const changes = appState.sync.stateInitialized ? syncStateChanged(previous, state) : { changed: false, projectsChanged: false, orderChanged: false, auditChanged: false };
-    rememberSyncState(state, true);
     if (changes.changed) {
       if (isEditingActive()) {
         appState.sync.pending = { revision: state.projectsRevision, message: "Updated from Team ESMI", changes: changes, state: state };
@@ -4059,6 +4412,8 @@ async function pollSyncStatus() {
       } else {
         await refreshFromSharedSource("Updated from Team ESMI", changes, state);
       }
+    } else {
+      rememberSyncState(state, true);
     }
   } catch (err) {
     recordSyncCheck(null, err);
@@ -4643,8 +4998,8 @@ function renderCard(t) {
   const recentClass = hoursSince(updatedAt) !== null && hoursSince(updatedAt) < 24 ? " recent-strong" : (isRecentlyUpdated(updatedAt, 7) ? " recent-soft" : "");
   const detailsOpen = appState.detailsCardId === t.id;
   const orderReason = reorderDisabledReason();
-  let html = '<div class="card s-' + esc(t.status) + recentClass + (t.highlight ? ' highlight' : '') + '" id="card-' + attr(t.id) + '" data-card-id="' + attr(t.id) + '">';
-  html += '<div class="card-topline"><button class="mini-btn order-drag-handle" type="button" draggable="true" data-order-handle="' + attr(t.id) + '" aria-label="Reorder ' + attr(t.title) + ' within ' + attr(STATUS_LABELS[t.status] || t.status) + '" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" aria-disabled="' + (orderReason ? 'true' : 'false') + '" title="' + attr(orderReason || 'Drag to reorder within this lane. Alt+Up or Alt+Down also moves this card.') + '">⋮⋮</button><div class="title">' + esc(t.title) + '</div><div class="card-top-actions">' +
+  let html = '<div class="card s-' + esc(t.status) + recentClass + (t.highlight ? ' highlight' : '') + '" id="card-' + attr(t.id) + '" data-card-id="' + attr(t.id) + '" aria-drag-enabled="' + (orderReason ? 'false' : 'true') + '">';
+  html += '<div class="card-topline"><button class="mini-btn order-drag-handle" type="button" data-order-handle="' + attr(t.id) + '" aria-label="Move ' + attr(t.title) + '" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight" aria-disabled="' + (orderReason ? 'true' : 'false') + '" title="' + attr(orderReason || 'Click and hold any safe card surface to move this card. Alt+Up/Down reorders; Alt+Left/Right changes lane.') + '">⋮⋮</button><div class="title">' + esc(t.title) + '</div><div class="card-top-actions">' +
     '<button class="mini-btn details-btn" type="button" data-details="' + attr(t.id) + '" aria-expanded="' + (detailsOpen ? 'true' : 'false') + '" aria-controls="details-' + attr(t.id) + '">Details</button>' +
     '<button class="mini-btn card-copy-ctx" type="button" data-copy-context="' + attr(t.id) + '" aria-label="Copy full project context for AI" title="Copy full project context for AI"><span class="copy-ctx-icon" aria-hidden="true">⧉</span></button>' +
     '<button class="mini-btn" data-edit="' + attr(t.id) + '" data-edit-required>Update</button></div></div>';
@@ -4829,6 +5184,7 @@ function render(projects, meta, options) {
   if (!(options && options.skipAsyncRefresh)) refreshFolderStatuses().catch(() => {});
   if (isPresentationOpen()) renderPresentationBoard();
   if (document.getElementById("presentationPanel").classList.contains("open")) renderPresentationSetup();
+  return verifyRenderedBoardOrder(appState.boardOrder, projects);
 }
 
 function renderDrawerFileDetails(card) {
@@ -5156,7 +5512,137 @@ async function generateMeetingPack(mode) {
   catch(err){status.textContent="Generation failed: "+err.message;}
 
 }
+
+function startPointerCardDrag(clientX, clientY) {
+  const drag = appState.reorder;
+  if (drag.phase !== "armed" || !canReorder(false)) return false;
+  const card = document.getElementById("card-" + CSS.escape(String(drag.cardId)));
+  if (!card) return false;
+  const rect = card.getBoundingClientRect();
+  const placeholder = document.createElement("div");
+  placeholder.className = "order-drag-placeholder";
+  placeholder.setAttribute("aria-hidden", "true");
+  placeholder.style.height = Math.max(48, Math.round(rect.height)) + "px";
+  placeholder.style.width = Math.round(rect.width) + "px";
+  card.parentNode.insertBefore(placeholder, card);
+  card.classList.add("drag-source", "dragging");
+
+  const ghost = card.cloneNode(true);
+  ghost.removeAttribute("id");
+  ghost.classList.remove("drag-source");
+  ghost.classList.add("order-drag-ghost");
+  ghost.setAttribute("aria-hidden", "true");
+  ghost.style.width = Math.round(rect.width) + "px";
+  ghost.style.height = Math.round(rect.height) + "px";
+  document.body.appendChild(ghost);
+
+  drag.active = true;
+  drag.phase = "dragging";
+  drag.suppressClick = true;
+  drag.placeholder = placeholder;
+  drag.ghost = ghost;
+  drag.lastX = clientX;
+  drag.lastY = clientY;
+  drag.offsetX = Math.max(0, Math.min(rect.width, clientX - rect.left));
+  drag.offsetY = Math.max(0, Math.min(rect.height, clientY - rect.top));
+  updateDragGhost(clientX, clientY);
+  updateDragTargetAt(clientX, clientY);
+  announceBoard("Dragging " + (orderCardById(drag.cardId)?.title || "card") + ". Move to a lane position, then release; press Escape to cancel.");
+  renderSyncIndicator();
+  return true;
+}
+
+function updateDragGhost(clientX, clientY) {
+  const ghost = appState.reorder.ghost;
+  if (!ghost) return;
+  ghost.style.left = Math.round(clientX - appState.reorder.offsetX) + "px";
+  ghost.style.top = Math.round(clientY - appState.reorder.offsetY) + "px";
+}
+
+function armPointerCardDrag(e) {
+  if (e.button !== undefined && e.button !== 0) return;
+  const card = e.target && e.target.closest ? e.target.closest(".card[data-card-id]") : null;
+  if (!card) return;
+  const handle = e.target.closest && e.target.closest("[data-order-handle]");
+  if (!handle && isInteractiveDragTarget(e.target)) return;
+  if (!canReorder(false)) return;
+  const column = card.closest(".column");
+  const id = card.getAttribute("data-card-id");
+  const lane = column && column.getAttribute("data-lane-key");
+  if (!id || !lane || !COLS.some(col => col.key === lane)) return;
+  const drag = appState.reorder;
+  clearOrderDragState();
+  drag.phase = "armed";
+  drag.cardId = String(id);
+  drag.lane = String(lane);
+  drag.pointerId = e.pointerId;
+  drag.startX = drag.lastX = e.clientX;
+  drag.startY = drag.lastY = e.clientY;
+  drag.priorLanes = cloneBoardOrderLanes(currentBoardOrderLanes());
+  drag.priorPayloadProjects = cloneProjectList(appState.payload && appState.payload.projects ? appState.payload.projects : appState.projects);
+  try { card.setPointerCapture(e.pointerId); } catch (_) {}
+  drag.holdTimer = window.setTimeout(() => startPointerCardDrag(drag.lastX, drag.lastY), DRAG_HOLD_MS);
+}
+
+function handlePointerCardMove(e) {
+  const drag = appState.reorder;
+  if (drag.pointerId !== e.pointerId || drag.phase === "idle") return;
+  drag.lastX = e.clientX;
+  drag.lastY = e.clientY;
+  if (drag.phase === "armed") {
+    const distance = Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY);
+    if (distance >= DRAG_MOVE_THRESHOLD_PX) startPointerCardDrag(e.clientX, e.clientY);
+    return;
+  }
+  if (!drag.active) return;
+  e.preventDefault();
+  updateDragGhost(e.clientX, e.clientY);
+  updateDragTargetAt(e.clientX, e.clientY);
+}
+
+async function finishPointerCardDrag(e) {
+  const drag = appState.reorder;
+  if (drag.pointerId !== e.pointerId || drag.phase === "idle") return;
+  if (drag.phase === "armed") {
+    clearOrderDragState();
+    return;
+  }
+  if (!drag.active) return;
+  e.preventDefault();
+  stopDragAutoScroll();
+  const id = drag.cardId;
+  const fromLane = drag.lane;
+  const toLane = drag.targetLane;
+  const beforeId = drag.targetBeforeId || "";
+  const targetIndex = drag.targetIndex;
+  const validTarget = !!toLane && targetIndex >= 0;
+  clearOrderDragState({ keepClickSuppressed: true });
+  if (!validTarget) {
+    showNotice("Drop the card on a highlighted workflow lane.", "error");
+    announceBoard("Drop cancelled because the destination is not a workflow lane.");
+  } else if (fromLane === toLane) {
+    await submitBoardOrder(reorderLanesWithMove(currentBoardOrderLanes(), fromLane, id, beforeId), { movedCardId: id, auditAction: "card_reordered", localFeedback: true, successMessage: "Card order saved." });
+  } else {
+    await submitCardMove(id, fromLane, toLane, targetIndex, { successMessage: "Card moved to " + STATUS_LABELS[toLane] + "." });
+  }
+  window.setTimeout(() => { appState.reorder.suppressClick = false; }, 80);
+  if (appState.sync.pending) resumeSyncAfterEditing(true);
+}
+
+function cancelPointerCardDrag(message) {
+  const drag = appState.reorder;
+  if (drag.phase === "idle") return;
+  clearOrderDragState({ keepClickSuppressed: true });
+  if (message) {
+    showNotice(message, "ok");
+    announceBoard(message);
+  }
+  window.setTimeout(() => { appState.reorder.suppressClick = false; }, 80);
+  if (appState.sync.pending) resumeSyncAfterEditing(true);
+}
+
 function bindEvents() {
+  installBoardOrderTestHooks();
   document.getElementById("themeToggle").onclick = () => {
     applyMainTheme(activeMainTheme() === "dark" ? "light" : "dark", true);
   };
@@ -5173,66 +5659,13 @@ function bindEvents() {
   document.getElementById("clearSearchBtn").onclick = () => clearBoardSearch(true);
   document.addEventListener("pointerdown", markSoundReady, { passive: true });
   document.addEventListener("keydown", markSoundReady, { passive: true });
-  document.body.addEventListener("dragstart", function(e) {
-    const handle = e.target.closest && e.target.closest("[data-order-handle]");
-    if (!handle) return;
-    if (!canReorder(true)) { e.preventDefault(); return; }
-    const card = handle.closest(".card");
-    const column = handle.closest(".column");
-    const id = handle.getAttribute("data-order-handle");
-    const lane = column && column.getAttribute("data-lane-key");
-    if (!card || !id || !lane || !COLS.some(col => col.key === lane)) { e.preventDefault(); return; }
-    appState.reorder.active = true;
-    appState.reorder.cardId = id;
-    appState.reorder.lane = lane;
-    appState.reorder.targetBeforeId = "";
-    appState.reorder.crossLaneAnnounced = false;
-    card.classList.add("dragging");
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = "move";
-      try { e.dataTransfer.setData("text/plain", id); } catch (_) {}
-    }
-    renderSyncIndicator();
-  });
-  document.body.addEventListener("dragover", function(e) {
-    if (!appState.reorder.active) return;
-    const column = e.target.closest && e.target.closest(".column");
-    if (!column) return;
-    const lane = column.getAttribute("data-lane-key");
-    if (lane !== appState.reorder.lane) {
-      if (e.dataTransfer) e.dataTransfer.dropEffect = "none";
-      removeOrderMarker();
-      appState.reorder.targetBeforeId = "";
-      if (!appState.reorder.crossLaneAnnounced) {
-        appState.reorder.crossLaneAnnounced = true;
-        announceBoard("Cross-lane dropping is not enabled. Use the existing status controls to move cards between lanes.");
-      }
-      return;
-    }
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-    const beforeCard = dragBeforeCard(column, e.clientY, appState.reorder.cardId);
-    setOrderInsertionMarker(column, beforeCard);
-  });
-  document.body.addEventListener("drop", async function(e) {
-    if (!appState.reorder.active) return;
-    const column = e.target.closest && e.target.closest(".column");
-    if (!column || column.getAttribute("data-lane-key") !== appState.reorder.lane) return;
-    e.preventDefault();
-    const id = appState.reorder.cardId;
-    const lane = appState.reorder.lane;
-    const beforeId = appState.reorder.targetBeforeId || "";
-    const priorLanes = currentBoardOrderLanes();
-    const nextLanes = reorderLanesWithMove(priorLanes, lane, id, beforeId);
-    clearOrderDragState();
-    await submitBoardOrder(nextLanes, { movedCardId: id, auditAction: "card_reordered", localFeedback: true, successMessage: "Card order saved." });
-    if (appState.sync.pending) resumeSyncAfterEditing(true);
-  });
-  document.body.addEventListener("dragend", function(e) {
-    if (!appState.reorder.active) return;
-    clearOrderDragState();
-    renderSyncIndicator();
-    if (appState.sync.pending) resumeSyncAfterEditing(true);
+  document.body.addEventListener("pointerdown", armPointerCardDrag, { passive: true });
+  document.body.addEventListener("pointermove", handlePointerCardMove, { passive: false });
+  document.body.addEventListener("pointerup", finishPointerCardDrag, { passive: false });
+  document.body.addEventListener("pointercancel", () => cancelPointerCardDrag("Drag cancelled."), { passive: true });
+  window.addEventListener("blur", () => {
+    stopDragAutoScroll();
+    if (appState.reorder.phase !== "idle") cancelPointerCardDrag("Drag cancelled because the window lost focus.");
   });
   document.body.addEventListener("click", function(e) {
     if (e.target.closest("#splash")) {
@@ -5301,6 +5734,12 @@ function bindEvents() {
       if (idx >= 0) openDrawer(idx);
     }
     if (["reviewed","blocked","waiting","done"].includes(action)) reviewQuick(action);
+    if (appState.reorder.suppressClick) return;
+    const surfaceCard = e.target.closest && e.target.closest(".card[data-card-id]");
+    if (surfaceCard && !isInteractiveDragTarget(e.target)) {
+      const idx = cardById(surfaceCard.getAttribute("data-card-id"));
+      if (idx >= 0) openDrawer(idx);
+    }
   });
   document.body.addEventListener("change", function(e) {
     const leadId = e.target.getAttribute("data-lead-input");
@@ -5325,9 +5764,10 @@ function bindEvents() {
   });
   document.body.addEventListener("keydown", function(e) {
     const orderHandle = e.target.closest && e.target.closest("[data-order-handle]");
-    if (orderHandle && e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+    if (orderHandle && e.altKey && !e.ctrlKey && !e.metaKey && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
       e.preventDefault();
-      moveCardByKeyboard(orderHandle.getAttribute("data-order-handle"), e.key === "ArrowUp" ? -1 : 1);
+      const direction = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" ? "previous-lane" : "next-lane";
+      moveCardByKeyboard(orderHandle.getAttribute("data-order-handle"), direction);
       return;
     }
     const leadId = e.target.getAttribute("data-lead-input");
@@ -5342,6 +5782,11 @@ function bindEvents() {
     }
   });
   document.addEventListener("keydown", function(e) {
+    if (e.key === "Escape" && appState.reorder.phase !== "idle") {
+      e.preventDefault();
+      cancelPointerCardDrag("Drag cancelled; the previous card position was restored.");
+      return;
+    }
     const overlayOpen = document.getElementById("presentationOverlay").classList.contains("open");
     if (!overlayOpen) {
       const target = e.target;
@@ -5492,7 +5937,13 @@ function bindEvents() {
     showNotice("Editing locked.", "ok");
     render(appState.projects, appState.meta);
   };
-  document.addEventListener("visibilitychange", requestSyncCheck);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") {
+      stopDragAutoScroll();
+      if (appState.reorder.phase !== "idle") cancelPointerCardDrag("Drag cancelled because the window was hidden.");
+    }
+    requestSyncCheck();
+  });
   window.addEventListener("focus", requestSyncCheck);
   document.getElementById("copySummaryBtn").onclick = async () => {
     const text = document.getElementById("summaryText").value;
@@ -5509,6 +5960,7 @@ function bindEvents() {
 
 async function boot() {
   try {
+    applyFixtureIdentity();
     initializeThemes();
     bindEvents();
     startSyncCountdown();
@@ -5543,6 +5995,7 @@ async function boot() {
     try { rememberSyncState(await fetchSyncState(), true); } catch (stateErr) { console.warn("Lightweight sync-state check unavailable", stateErr); }
     startSyncPolling();
     installBoardOrderTestHooks();
+    await autoUnlockFixtureForTest();
     markSplashReady();
   } catch (err) {
     appState.sync.syncInFlight = false;
