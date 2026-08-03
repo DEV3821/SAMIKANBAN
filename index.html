@@ -984,8 +984,32 @@
   .activity-item-head time { color: var(--muted); white-space: nowrap; }
   .activity-change { margin-top: 0.18rem; color: var(--muted); font-size: 0.64rem; overflow-wrap: anywhere; }
   .activity-toggle { margin-top: 0.5rem; padding: 0.3rem 0.48rem; font-size: 0.66rem; }
+  .drawer-history {
+    grid-column: 1 / -1;
+    margin-top: 0.1rem;
+    padding: 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: #f8fafc;
+  }
+  .drawer-history h3 { margin: 0 0 0.55rem; color: var(--sa-blue-dark); font-size: 0.82rem; }
+  .history-empty { color: var(--muted); font-size: 0.72rem; }
+  .history-entry { padding: 0.55rem 0; border-top: 1px solid rgba(17,24,39,0.08); }
+  .history-entry:first-child { border-top: 0; padding-top: 0; }
+  .history-entry-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.7rem; }
+  .history-entry-head b { color: var(--charcoal); font-size: 0.72rem; }
+  .history-entry-head time { color: var(--muted); font-size: 0.65rem; white-space: nowrap; }
+  .history-entry-note { margin-top: 0.25rem; color: var(--muted); font-size: 0.66rem; }
+  .history-field { margin-top: 0.32rem; }
+  .history-field-label { display: block; color: var(--muted); font-size: 0.61rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.025em; }
+  .history-field-value { margin-top: 0.08rem; color: var(--charcoal); font-size: 0.7rem; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .history-files { margin: 0.25rem 0 0; padding-left: 1.05rem; color: var(--charcoal); font-size: 0.69rem; }
+  .history-files li { margin: 0.16rem 0; }
+  .history-older { margin-top: 0.4rem; }
+  .history-older summary { cursor: pointer; color: var(--sa-blue-dark); font-size: 0.68rem; font-weight: 750; }
   body.presentation-active .drawer-files,
   body.presentation-active .drawer-activity,
+  body.presentation-active .drawer-history,
   body.presentation-active .details-btn,
   body.presentation-active .card-details-panel { display: none !important; }
   .form-grid {
@@ -2391,7 +2415,13 @@
       <input id="fEvidence" autocomplete="off">
     </div>
     <div class="span-2">
-      <label for="fNotes">Notes</label>
+      <div class="drawer-history" id="drawerProjectHistory" aria-labelledby="drawerProjectHistoryTitle">
+        <h3 id="drawerProjectHistoryTitle">Project Update History</h3>
+        <div id="drawerProjectHistoryItems"></div>
+      </div>
+    </div>
+    <div class="span-2">
+      <label for="fNotes">Additional Notes</label>
       <textarea id="fNotes"></textarea>
     </div>
     <div>
@@ -2538,7 +2568,8 @@ let appState = {
   sync: {
     projectsRevision: "", projectsSignature: "", auditRevision: "", auditSignature: "", pending: null, timer: null, countdownTimer: null, lastStatus: null, lastState: null, stateInitialized: false, lastError: "", lastSuccessMessage: "",
     lastSyncStartedAt: null, lastSyncSucceededAt: null, lastSyncFailedAt: null, nextSyncDueAt: null,
-    isEditing: false, teamReachable: null, syncInFlight: false, ownBoardOrderChangeId: "", ownProjectsSignature: "", lastChangeId: ""
+    isEditing: false, teamReachable: null, syncInFlight: false, ownBoardOrderChangeId: "", ownProjectsSignature: "", lastChangeId: "",
+    projectFileIndexSignature: "", projectFileIndexRevision: 0
   }
 };
 let splashReady = false;
@@ -2732,8 +2763,10 @@ function flushRemoteNotifications() {
 
 function queueRemoteNotification(state, changes) {
   if (!state || !changes) return;
+  if (!changes.projectsChanged && !changes.orderChanged && !changes.auditChanged) return;
   const isOwnOrderChange = !!(appState.sync.ownBoardOrderChangeId && state.boardOrderChangeId && String(state.boardOrderChangeId) === String(appState.sync.ownBoardOrderChangeId));
   const isOwnProjectsChange = !!(appState.sync.ownProjectsSignature && state.projectsSignature && String(state.projectsSignature) === String(appState.sync.ownProjectsSignature));
+  if (isOwnProjectsChange && !changes.orderChanged) return;
   if (isOwnOrderChange && (!changes.projectsChanged || isOwnProjectsChange)) return;
   const token = [state.projectsSignature || state.projectsRevision || "", state.boardOrderSignature || "", state.boardOrderChangeId || ""].join("|");
   if (!token || appState.remoteNotifications.seen.has(token)) return;
@@ -2744,7 +2777,7 @@ function queueRemoteNotification(state, changes) {
   }
   appState.remoteNotifications.count++;
   appState.remoteNotifications.orderChanged = appState.remoteNotifications.orderChanged || !!changes.orderChanged;
-  appState.remoteNotifications.projectChanged = appState.remoteNotifications.projectChanged || !!changes.projectChanged;
+  appState.remoteNotifications.projectChanged = appState.remoteNotifications.projectChanged || !!(changes.projectChanged || changes.projectsChanged || changes.auditChanged);
   if (appState.remoteNotifications.timer) window.clearTimeout(appState.remoteNotifications.timer);
   appState.remoteNotifications.timer = window.setTimeout(flushRemoteNotifications, REMOTE_NOTIFY_COALESCE_MS);
 }
@@ -2936,6 +2969,88 @@ async function loadProjectFileIndex() {
     console.warn("Project file index unavailable; file details are hidden.", err);
   }
 }
+function projectHistoryItems(card) {
+  const raw = card && card.projectHistory;
+  const items = Array.isArray(raw) ? raw : (raw && typeof raw === "object" ? [raw] : []);
+  return items.filter(item => item && typeof item === "object").slice().sort((a, b) => {
+    const left = toDate(a.occurredAt || a.timestamp), right = toDate(b.occurredAt || b.timestamp);
+    if (left && right) return right - left;
+    const timeOrder = String(b.occurredAt || b.timestamp || "").localeCompare(String(a.occurredAt || a.timestamp || ""));
+    if (timeOrder) return timeOrder;
+    return String(b.id || b.changeId || "").localeCompare(String(a.id || a.changeId || ""));
+  });
+}
+function projectHistoryLabel(event) {
+  switch (String(event && event.type || "")) {
+    case "next_action_baseline": return "Current next action baseline";
+    case "next_action_set": return "Next action entered";
+    case "next_action_changed": return "Next action updated";
+    case "next_action_cleared": return "Next action cleared";
+    case "project_file_added": {
+      const count = Number(event.fileCount || (Array.isArray(event.files) ? event.files.length : 0));
+      return (count > 1 ? count + " project files added" : "Project file added");
+    }
+    default: return "Project update";
+  }
+}
+function historyFieldMarkup(label, value) {
+  if (value === undefined || value === null || String(value) === "") return "";
+  return '<div class="history-field"><span class="history-field-label">' + esc(label) + '</span><div class="history-field-value">' + esc(String(value)) + '</div></div>';
+}
+function historyFileSize(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) return "";
+  if (bytes < 1024) return bytes + " B";
+  return Math.max(1, Math.round(bytes / 1024)) + " KB";
+}
+function projectHistoryEntryMarkup(event) {
+  const when = formatActivityStamp(event.occurredAt || event.timestamp, false);
+  const type = String(event.type || "");
+  let body = "";
+  if (type === "next_action_baseline" || type === "next_action_set" || type === "next_action_changed") {
+    body += historyFieldMarkup("Next action", event.nextAction);
+    body += historyFieldMarkup("Previous next action", event.previousNextAction);
+    if (type === "next_action_baseline") body += '<div class="history-entry-note">This records the action present when automatic history tracking was enabled.</div>';
+  } else if (type === "next_action_cleared") {
+    body += historyFieldMarkup("Previous next action", event.previousNextAction);
+    body += '<div class="history-entry-note">The Next Action field was cleared.</div>';
+  } else if (type === "project_file_added") {
+    const files = Array.isArray(event.files) ? event.files : [];
+    body += '<ul class="history-files">' + files.map(file => {
+      const name = String(file && file.name || "File");
+      const location = String(file && file.relativePath || "");
+      const bits = [name];
+      if (location) bits.push(" — " + location);
+      const typeLabel = String(file && file.friendlyType || "");
+      const size = historyFileSize(file && file.size);
+      if (typeLabel || size) bits.push(" (" + [typeLabel, size].filter(Boolean).join(", ") + ")");
+      return '<li>' + esc(bits.join("")) + '</li>';
+    }).join("") + '</ul>';
+    if (!files.length) body += historyFieldMarkup("Files", "Project files added");
+  }
+  const snapshot = event.snapshot && typeof event.snapshot === "object" ? event.snapshot : {};
+  const statusLabel = snapshot.status ? (STATUS_LABELS[normalizeStatus(snapshot.status)] || snapshot.status) : "";
+  const healthLabel = snapshot.health ? projectHealthLabel(snapshot.health) : "";
+  body += historyFieldMarkup("Status / health", [statusLabel, healthLabel].filter(Boolean).join(" · "));
+  body += historyFieldMarkup("Owner", snapshot.owner);
+  body += historyFieldMarkup("Project lead", snapshot.projectLead);
+  body += historyFieldMarkup("Review date", snapshot.reviewDate);
+  body += historyFieldMarkup("Blocker", snapshot.blocker);
+  body += historyFieldMarkup("Recorded by", event.actor);
+  return '<article class="history-entry"><div class="history-entry-head"><b>' + esc(projectHistoryLabel(event)) + '</b><time>' + esc(when || "Date unavailable") + '</time></div>' + body + '</article>';
+}
+function renderProjectHistory(card) {
+  const target = document.getElementById("drawerProjectHistoryItems");
+  if (!target) return;
+  const items = projectHistoryItems(card);
+  if (!items.length) {
+    target.innerHTML = '<div class="history-empty">No automatic project updates have been recorded yet.</div>';
+    return;
+  }
+  const latest = items.slice(0, 5).map(projectHistoryEntryMarkup).join("");
+  const older = items.slice(5).map(projectHistoryEntryMarkup).join("");
+  target.innerHTML = latest + (older ? '<details class="history-older"><summary>Show older automatic updates (' + (items.length - 5) + ')</summary>' + older + '</details>' : '');
+}
 const ACTIVITY_FIELD_META = {
   status: ["status_changed", "Status changed"], riskColour: ["risk_changed", "Project health changed"],
   projectLead: ["lead_changed", "Lead changed"], owner: ["lead_changed", "Owner changed"],
@@ -3015,6 +3130,12 @@ function activityItemsFor(card) {
   });
   return Array.from(unique.values()).sort((a,b) => String(b.timestamp).localeCompare(String(a.timestamp))).slice(0, 20);
 }
+function isAutomaticProjectHistoryActivity(item) {
+  return item && ["next_action_recorded", "project_file_added"].includes(String(item.type || ""));
+}
+function nonAutomaticActivityItemsFor(card) {
+  return activityItemsFor(card).filter(item => !isAutomaticProjectHistoryActivity(item));
+}
 function formatActivityStamp(value, compact) {
   const date = toDate(value);
   if (!date) return "";
@@ -3078,7 +3199,7 @@ function activityItemsMarkup(items, limit) {
 }
 function cardDetailsMarkup(card) {
   const fileEntry = projectFileEntry(card);
-  const activities = activityItemsFor(card);
+  const activities = nonAutomaticActivityItemsFor(card);
   const lead = leadFor(card) || "Unassigned";
   const updated = formatActivityStamp(getCardUpdatedAt(card), false) || "Not recorded";
   const risk = String(card.riskColour || "Not recorded");
@@ -3091,8 +3212,10 @@ function cardDetailsMarkup(card) {
     '<div class="details-field wide"><span>Current state</span><b>' + esc(card.context || "Not recorded") + '</b></div>' +
     '<div class="details-field wide"><span>Next action</span><b>' + esc(card.nextAction || "Not recorded") + '</b></div>' +
     '</div>';
-  if (card.notes) html += '<details class="details-notes"><summary>Show notes</summary><div>' + esc(card.notes) + '</div></details>';
+  if (card.notes) html += '<details class="details-notes"><summary>Additional Notes</summary><div>' + esc(card.notes) + '</div></details>';
   html += '</section>';
+  const history = projectHistoryItems(card);
+  html += '<section class="details-section"><h4>Project Update History</h4>' + (history.length ? history.slice(0, 5).map(projectHistoryEntryMarkup).join("") + (history.length > 5 ? '<details class="history-older"><summary>Show older automatic updates (' + (history.length - 5) + ')</summary>' + history.slice(5).map(projectHistoryEntryMarkup).join("") + '</details>' : '') : '<div class="history-empty">No automatic project updates have been recorded yet.</div>') + '</section>';
   if (fileEntry) {
     const fileFields = [["Total", "fileCount"], ["Admin", "adminCount"], ["Planning", "planningCount"], ["Delivery", "deliveryCount"],
       ["Meetings", "meetingsCount"], ["Risks / Issues / Decisions", "risksIssuesDecisionsCount"], ["Evidence", "evidenceCount"], ["Closeout", "closeoutCount"]];
@@ -3255,13 +3378,16 @@ async function saveNewProjects(entries, createFolders) {
   }
   warnings.push(...await appendAuditEvents(preSaveEvents));
   const originalProjects = appState.projects.slice(); appState.payload.projects = originalProjects.concat(cards);
-  try { await postJson("api/projects", appState.payload); }
+  try {
+    const savePayload = Object.assign({}, appState.payload, { projects: appState.payload.projects, auditEvents: postSaveEvents });
+    const saveResult = await postJson("api/projects", savePayload);
+    applyCanonicalProjectSave(saveResult);
+  }
   catch (err) { appState.payload.projects = originalProjects; throw new Error(err.message + (preSaveEvents.length ? " Folder creation was not rolled back; retry saving the project." : "")); }
   if (appState.boardOrder.exists && appState.sync.teamReachable) {
     const orderSaved = await persistLaneOrderAfterProjectCreate(cards);
     if (!orderSaved) warnings.push("The new card was saved, but the shared lane order could not be updated.");
   }
-  warnings.push(...await appendAuditEvents(postSaveEvents));
   await loadLatestProjectsFromServer(cards.length + " project(s) saved and synced.");
   if (warnings.length) showNotice("Saved with warning: " + warnings.join(" | "), "error");
   return true;
@@ -3288,8 +3414,9 @@ async function createFolderForCard(id) {
   if (result.created) await appendAuditEvents([auditEventFor(card, "project.folder_created", "Project folder template created.", {}, { folder:folder })]);
   card.folder = folder; appState.payload.projects = appState.projects;
   try {
-    await postJson("api/projects", appState.payload);
-    await appendAuditEvents([auditEventFor(card, "project.folder_linked", "Existing project linked to its project folder.", {}, { folder:folder })]);
+    const linkEvent = auditEventFor(card, "project.folder_linked", "Existing project linked to its project folder.", {}, { folder:folder });
+    const saveResult = await postJson("api/projects", Object.assign({}, appState.payload, { projects: appState.projects, auditEvents: [linkEvent] }));
+    applyCanonicalProjectSave(saveResult);
     await loadLatestProjectsFromServer("Project folder created and linked.");
     if ((result.warnings || []).length) showNotice(result.warnings.join(" "), "error");
   } catch (err) { delete card.folder; showNotice("Folder was created but the card link could not be saved. Retry Create project folder. " + err.message, "error"); }
@@ -4116,10 +4243,11 @@ function retryCountdown(now) {
 function syncStatusIsHealthy(status) {
   const source = status && status.source, local = status && status.local;
   const orderMatches = !status.boardOrderJson || (!status.boardOrderJson.exists && (!local || !local.boardOrder || !local.boardOrder.exists)) || (status.boardOrderJson.exists && local && local.boardOrder && local.boardOrder.exists && status.boardOrderJson.hash === local.boardOrder.hash);
+  const fileIndexMatches = !status.projectFileIndexJson || (!status.projectFileIndexJson.exists && (!local || !local.projectFileIndex || !local.projectFileIndex.exists)) || (status.projectFileIndexJson.exists && local && local.projectFileIndex && local.projectFileIndex.exists && status.projectFileIndexJson.signature === local.projectFileIndex.hash);
   return !!(status && status.teamReachable && status.mode === "team-canonical" && source && local && orderMatches &&
     source.projects && source.projects.exists && source.audit && source.audit.exists &&
     local.projects && local.projects.exists && local.audit && local.audit.exists &&
-    source.projects.hash === local.projects.hash && source.audit.hash === local.audit.hash);
+    source.projects.hash === local.projects.hash && source.audit.hash === local.audit.hash && fileIndexMatches);
 }
 function recordSyncCheck(status, error, successMessage) {
   const now = Date.now();
@@ -4179,7 +4307,9 @@ function syncStateFromFullStatus(status) {
     boardOrderRevision: Number(boardOrder.revision || previous.boardOrderRevision || 0),
     boardOrderChangeId: String(boardOrder.changeId || previous.boardOrderChangeId || ""),
     boardOrderSignature: String(boardOrder.signature || previous.boardOrderSignature || ""),
-    latestAuditSignature: sourceAuditSignature(status)
+    latestAuditSignature: sourceAuditSignature(status),
+    projectFileIndexRevision: Number(status && status.projectFileIndexJson ? status.projectFileIndexJson.indexRevision || 0 : previous.projectFileIndexRevision || 0),
+    projectFileIndexSignature: String(status && status.projectFileIndexJson ? status.projectFileIndexJson.signature || "" : previous.projectFileIndexSignature || "")
   };
 }
 function rememberSyncState(state, markInitial) {
@@ -4192,7 +4322,9 @@ function rememberSyncState(state, markInitial) {
     boardOrderRevision: Number(state.boardOrderRevision || 0),
     boardOrderChangeId: String(state.boardOrderChangeId || ""),
     boardOrderSignature: String(state.boardOrderSignature || ""),
-    latestAuditSignature: String(state.latestAuditSignature || "")
+    latestAuditSignature: String(state.latestAuditSignature || ""),
+    projectFileIndexRevision: Number(state.projectFileIndexRevision || 0),
+    projectFileIndexSignature: String(state.projectFileIndexSignature || "")
   };
   appState.sync.lastState = normalized;
   appState.sync.stateInitialized = markInitial !== false;
@@ -4204,15 +4336,18 @@ function rememberSyncState(state, markInitial) {
   if (normalized.projectsRevision) appState.sync.projectsRevision = normalized.projectsRevision;
   if (normalized.projectsSignature) appState.sync.projectsSignature = normalized.projectsSignature;
   if (normalized.latestAuditSignature) appState.sync.auditSignature = normalized.latestAuditSignature;
+  if (normalized.projectFileIndexSignature) appState.sync.projectFileIndexSignature = normalized.projectFileIndexSignature;
+  appState.sync.projectFileIndexRevision = normalized.projectFileIndexRevision;
 }
 function syncStateChanged(previous, next) {
-  if (!previous || !next) return { changed: false, projectsChanged: false, orderChanged: false, auditChanged: false };
+  if (!previous || !next) return { changed: false, projectsChanged: false, orderChanged: false, auditChanged: false, filesChanged: false };
   const projectsChanged = String(previous.projectsSignature || previous.projectsRevision || "") !== String(next.projectsSignature || next.projectsRevision || "");
   const orderChanged = String(previous.boardOrderSignature || "") !== String(next.boardOrderSignature || "") ||
     String(previous.boardOrderChangeId || "") !== String(next.boardOrderChangeId || "") ||
     Number(previous.boardOrderRevision || 0) !== Number(next.boardOrderRevision || 0);
   const auditChanged = String(previous.latestAuditSignature || "") !== String(next.latestAuditSignature || "");
-  return { changed: projectsChanged || orderChanged || auditChanged || previous.canonicalAvailable !== next.canonicalAvailable, projectsChanged, orderChanged, auditChanged };
+  const filesChanged = String(previous.projectFileIndexSignature || "") !== String(next.projectFileIndexSignature || "") || Number(previous.projectFileIndexRevision || 0) !== Number(next.projectFileIndexRevision || 0);
+  return { changed: projectsChanged || orderChanged || auditChanged || filesChanged || previous.canonicalAvailable !== next.canonicalAvailable, projectsChanged, orderChanged, auditChanged, filesChanged };
 }
 function rememberSyncStatus(status, successMessage) {
   recordSyncCheck(status, null, successMessage);
@@ -4316,6 +4451,7 @@ async function loadLatestProjectsFromServer(message) {
   recordSyncCheck(status, null, message);
   scheduleNextSync(document.visibilityState === "visible" ? SYNC_FAST_POLL_MS : SYNC_HIDDEN_POLL_MS);
   await loadAuditUpdates();
+  await loadProjectFileIndex();
   await loadBoardOrder(appState.payload.projects || [], { showWarning: false });
   rememberSyncState(syncStateFromFullStatus(status), true);
   render(appState.payload.projects || [], appState.payload.meta || {});
@@ -4344,6 +4480,7 @@ async function refreshFromSharedSource(message, remoteChanges, remoteState) {
   appState.payload = nextPayload;
   rememberSyncStatus(status, message);
   await loadAuditUpdates();
+  await loadProjectFileIndex();
   const orderState = await loadBoardOrder(appState.payload.projects || [], { showWarning: false });
   render(appState.payload.projects || [], appState.payload.meta || {});
   const rendered = verifyRenderedBoardOrder(orderState, appState.payload.projects || []);
@@ -4810,11 +4947,36 @@ function projectContextMarkdown(card) {
     if (decisions) { lines.push("### Decisions required", decisions, ""); }
     if (blockers) { lines.push("### Blockers", blockers, ""); }
   }
-  if (card.notes) { lines.push("## Notes", card.notes, ""); }
+  const automaticHistory = projectHistoryItems(card);
+  lines.push("## Project Update History");
+  lines.push("- Automatic entry count: " + automaticHistory.length);
+  if (!automaticHistory.length) {
+    lines.push("- No automatic project updates have been recorded yet.");
+  } else {
+    automaticHistory.forEach(item => {
+      const stamp = formatActivityStamp(item.occurredAt || item.timestamp, false) || "Date unavailable";
+      lines.push("### " + stamp + " — " + projectHistoryLabel(item));
+      if (item.nextAction !== undefined && item.nextAction !== "") lines.push("- Next action: " + String(item.nextAction));
+      if (item.previousNextAction !== undefined && item.previousNextAction !== "") lines.push("- Previous next action: " + String(item.previousNextAction));
+      if (item.cleared) lines.push("- State: cleared");
+      const historySnapshot = item.snapshot && typeof item.snapshot === "object" ? item.snapshot : {};
+      if (historySnapshot.status || historySnapshot.health) lines.push("- Status / health: " + [historySnapshot.status ? (STATUS_LABELS[normalizeStatus(historySnapshot.status)] || historySnapshot.status) : "", historySnapshot.health ? projectHealthLabel(historySnapshot.health) : ""].filter(Boolean).join(" · "));
+      if (historySnapshot.owner) lines.push("- Owner: " + historySnapshot.owner);
+      if (historySnapshot.projectLead) lines.push("- Project lead: " + historySnapshot.projectLead);
+      if (historySnapshot.reviewDate) lines.push("- Review date: " + historySnapshot.reviewDate);
+      if (historySnapshot.blocker) lines.push("- Blocker: " + historySnapshot.blocker);
+      if (Array.isArray(item.files) && item.files.length) item.files.forEach(file => lines.push("- File: " + String(file.name || "File") + (file.relativePath ? " — " + String(file.relativePath) : "")));
+      lines.push("");
+    });
+  }
+  lines.push("## Additional Notes");
+  if (card.notes !== undefined && card.notes !== null && String(card.notes) !== "") lines.push(String(card.notes));
+  else lines.push("No additional notes recorded.");
+  lines.push("");
   const folder = folderMetadata(card);
   if (folder || appState.projectFileIndex) {
     lines.push("## Project Files");
-    pushField("Canonical project folder", folder ? (folder.canonicalPath || folder.path || "") : "");
+    pushField("Linked project folder", folder ? (folder.relativePath || "") : "");
     const entry = projectFileEntry(card);
     if (entry) {
       pushField("Indexed file count", fileIndexCount(entry, "fileCount"));
@@ -4829,21 +4991,11 @@ function projectContextMarkdown(card) {
     }
     lines.push("");
   }
-  const recentActivity = activityItemsFor(card).slice(0, 5);
+  const recentActivity = nonAutomaticActivityItemsFor(card).slice(0, 5);
   if (recentActivity.length) {
     lines.push("## Recent Activity");
     recentActivity.forEach(item => {
       lines.push("- " + formatActivityStamp(item.timestamp, false) + " · " + item.summary + (item.actor ? " (" + item.actor + ")" : ""));
-    });
-    lines.push("");
-  }
-  const fullHistory = activityItemsFor(card);
-  if (fullHistory.length) {
-    lines.push("## Full Meaningful Update History");
-    fullHistory.forEach(item => {
-      const change = (item.details && item.details.oldValue && item.details.newValue)
-        ? " — " + safeActivityValue(item.details.oldValue) + " → " + safeActivityValue(item.details.newValue) : "";
-      lines.push("- " + formatActivityStamp(item.timestamp, false) + " · " + item.summary + change + (item.actor ? " (" + item.actor + ")" : ""));
     });
     lines.push("");
   }
@@ -5212,7 +5364,7 @@ function renderDrawerActivity(card) {
   const section = document.getElementById("drawerActivity");
   const target = document.getElementById("drawerActivityItems");
   const toggle = document.getElementById("activityToggle");
-  const items = activityItemsFor(card);
+  const items = nonAutomaticActivityItemsFor(card);
   if (!section || !target || !toggle || !items.length || document.body.classList.contains("presentation-active")) {
     if (section) section.hidden = true;
     return;
@@ -5243,9 +5395,10 @@ function openDrawer(index) {
   document.getElementById("fBlocker").value = displayText(t.blockerReason);
   document.getElementById("fReviewDate").value = t.reviewDate || "";
   document.getElementById("fEvidence").value = displayText(t.evidenceSource);
-  document.getElementById("fNotes").value = displayText(t.notes);
+  document.getElementById("fNotes").value = t.notes === undefined || t.notes === null ? "" : String(t.notes);
   document.getElementById("fCompletedDate").value = t.completedDate || "";
   document.getElementById("fCompletedOutcome").value = displayText(t.completedOutcome);
+  renderProjectHistory(t);
   renderDrawerFileDetails(t);
   renderDrawerActivity(t);
   document.getElementById("drawerBackdrop").classList.add("open");
@@ -5269,9 +5422,28 @@ function readFormInto(card) {
   card.blocked = card.blockerReason;
   card.reviewDate = document.getElementById("fReviewDate").value;
   card.evidenceSource = document.getElementById("fEvidence").value.trim();
-  card.notes = document.getElementById("fNotes").value.trim();
+  // Notes are user-owned text. Preserve paragraphs, whitespace, punctuation and
+  // Unicode exactly as entered; the server manages automatic history separately.
+  card.notes = document.getElementById("fNotes").value;
   card.completedDate = document.getElementById("fCompletedDate").value;
   card.completedOutcome = document.getElementById("fCompletedOutcome").value.trim();
+}
+function applyCanonicalProjectSave(result) {
+  if (!result || !result.canonicalProjects || !Array.isArray(result.canonicalProjects.projects)) {
+    throw new Error("The server did not return a canonical project state.");
+  }
+  appState.payload = result.canonicalProjects;
+  appState.projects = appState.payload.projects;
+  if (result.projectsRevision) appState.sync.projectsRevision = String(result.projectsRevision);
+  if (result.projectsSignature) {
+    appState.sync.projectsSignature = String(result.projectsSignature);
+    appState.sync.ownProjectsSignature = String(result.projectsSignature);
+  }
+  if (appState.sync.lastState) {
+    appState.sync.lastState.projectsRevision = String(result.projectsRevision || appState.sync.lastState.projectsRevision || "");
+    appState.sync.lastState.projectsSignature = String(result.projectsSignature || appState.sync.lastState.projectsSignature || "");
+  }
+  (Array.isArray(result.auditEvents) ? result.auditEvents : []).forEach(rememberAuditUpdate);
 }
 async function postJson(url, body) {
   const headers = { "Content-Type": "application/json; charset=utf-8" };
@@ -5303,8 +5475,9 @@ async function persistCard(action, note, mutate) {
   if (appState.editingIndex < 0) return;
   if (appState.saving) return; // prevent duplicate submissions
   setSaveUi("saving");
-  if (!(await ensureFreshBeforeSave())) return;
+  if (!(await ensureFreshBeforeSave())) { setSaveUi("idle"); return; }
   const card = appState.projects[appState.editingIndex];
+  const originalPayload = JSON.parse(JSON.stringify(appState.payload));
   const previousStatus = normalizeStatus(card.status);
   const before = fieldSnapshot(card);
   if (mutate) mutate(card);
@@ -5329,10 +5502,12 @@ async function persistCard(action, note, mutate) {
   Object.assign(event, structuredActivity(action, diff));
   let laneOrderWarning = "";
   try {
-    await postJson("api/card-updates", event);
-    rememberAuditUpdate(event);
-    appState.payload.projects = appState.projects;
-    await postJson("api/projects", appState.payload);
+    const savePayload = Object.assign({}, appState.payload, { projects: appState.projects, auditEvents: [event] });
+    const saveResult = await postJson("api/projects", savePayload);
+    applyCanonicalProjectSave(saveResult);
+    const canonicalCard = cardById(card.id) >= 0 ? appState.projects[cardById(card.id)] : card;
+    await loadBoardOrder(appState.projects, { showWarning: false });
+    render(appState.projects, appState.payload.meta || {});
     if (previousStatus !== normalizeStatus(card.status)) {
       const orderSaved = await persistLaneOrderAfterStatusChange(card.id, previousStatus, normalizeStatus(card.status));
       if (!orderSaved && appState.boardOrder.exists) laneOrderWarning = "Project updated, but the shared lane order could not be saved.";
@@ -5341,11 +5516,12 @@ async function persistCard(action, note, mutate) {
     closeDrawer();
     setSaveUi("saved");
     setTimeout(() => setSaveUi("idle"), 1600);
-    await loadLatestProjectsFromServer(null);
     renderReviewCurrent();
-    onManualSaveSuccess(card, "Project updated");
+    onManualSaveSuccess(canonicalCard, "Project updated");
     if (laneOrderWarning) showNotice(laneOrderWarning, "error");
   } catch (err) {
+    appState.payload = originalPayload;
+    appState.projects = appState.payload.projects || [];
     setSaveUi("failed");
     setTimeout(() => setSaveUi("idle"), 2400);
     showNotice("Save failed. Audit/data not updated: " + err.message, "error");
@@ -5358,6 +5534,7 @@ async function persistLeadChange(id, value) {
   if (idx < 0) return;
   if (!(await ensureFreshBeforeSave())) return;
   const card = appState.projects[idx];
+  const originalPayload = JSON.parse(JSON.stringify(appState.payload));
   const beforeLead = leadFor(card);
   const nextLead = (value || "").trim();
   if (beforeLead === nextLead) {
@@ -5387,16 +5564,19 @@ async function persistLeadChange(id, value) {
   };
   Object.assign(event, structuredActivity("change_project_lead", diff));
   try {
-    await postJson("api/card-updates", event);
-    rememberAuditUpdate(event);
-    appState.payload.projects = appState.projects;
-    await postJson("api/projects", appState.payload);
+    const savePayload = Object.assign({}, appState.payload, { projects: appState.projects, auditEvents: [event] });
+    const saveResult = await postJson("api/projects", savePayload);
+    applyCanonicalProjectSave(saveResult);
+    const canonicalCard = appState.projects[cardById(id)] || card;
+    await loadBoardOrder(appState.projects, { showWarning: false });
+    render(appState.projects, appState.payload.meta || {});
     setSaveUi("saved");
     setTimeout(() => setSaveUi("idle"), 1600);
-    await loadLatestProjectsFromServer(null);
     renderReviewCurrent();
-    onManualSaveSuccess(card, "Project updated");
+    onManualSaveSuccess(canonicalCard, "Project updated");
   } catch (err) {
+    appState.payload = originalPayload;
+    appState.projects = appState.payload.projects || [];
     showNotice("Save failed. Audit/data not updated: " + err.message, "error");
     if (originalProjectLead === undefined) delete card.projectLead;
     else card.projectLead = originalProjectLead;

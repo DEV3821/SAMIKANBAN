@@ -1,6 +1,6 @@
 {
-    "version":  "2026.08.03.122015",
-    "releasedAt":  "2026-08-03T12:20:15.0000000+09:30",
-    "message":  "Easier bounded drag and drop, atomic cross-lane card moves, edge auto-scroll, and verified remote visual updates before chimes",
+    "version":  "2026.08.03.144147",
+    "releasedAt":  "2026-08-03T14:41:47.8034682+09:30",
+    "message":  "Server-managed Project Update History, exact Notes preservation, linked project-folder file detection, safe baseline migration, and Meeting Pack history context",
     "requiresReload":  true
 }

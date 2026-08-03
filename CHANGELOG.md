@@ -1,5 +1,16 @@
 # SAMI Kanban WorkServer Change Log
 
+## 2026-08-03 — 2026.08.03.144147
+
+- Added server-managed Project Update History for Next Action set, changed, cleared, and baseline events with server timestamps, reliable actors only, deterministic snapshots, stale-revision protection, atomic project/audit writes, and idempotent retries.
+- Preserved Additional Notes exactly as entered, including paragraphs, whitespace, punctuation, Unicode and literal markup; the drawer, Project Context, and Meeting Pack expose Notes separately from automatic history.
+- History synchronises automatically between open Kanban users; receiving users get one configured update chime after the visible refresh, with initiating-user echoes suppressed.
+- Added linked project-folder metadata scanning with temporary/backup exclusion, stable-access deferral, exact folder mapping, metadata-only file records, rename/delete reconciliation, shared index revisioning, and one-time `project_file_added` history events.
+- New files are detected only after their metadata is stable; file contents are never opened, read, parsed, uploaded or summarised.
+- Added preview-first `tools/migrate_project_history.ps1` with expected-revision apply protection, timestamped backups, rollback verification, optional explicit file baseline establishment, and migration state idempotency.
+- Added isolated synthetic history and file-detection regression suites; existing card-move, board-order, drag-state, launcher, sync workflow, and Meeting Pack checks remain covered.
+- Existing dragging, cross-lane movement, auto-scroll, keyboard movement, and Start Menu installations remain supported; the normal Team ESMI refresh requires no reinstall.
+
 ## 2026-08-03 — 2026.08.03.122015
 
 - Dragging is easier and can begin from the non-interactive card surface, while buttons, links, inputs, labels, file controls and Project Context controls remain protected.

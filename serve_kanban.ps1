@@ -37,6 +37,11 @@ function Initialize-LogPath {
 $script:LogPath = Initialize-LogPath $LogPath
 $script:BackedUpPaths = @{}
 $script:EditSessions = @{}
+$script:ProjectFileScanState = @{
+  lastScan = $null
+  folderSignatures = @{}
+  candidates = @{}
+}
 $script:StartedAt = (Get-Date).ToString("o")
 $script:ServerScriptHash = try { (Get-FileHash -Algorithm SHA256 -LiteralPath $PSCommandPath).Hash.ToLowerInvariant() } catch { "unknown" }
 
@@ -329,26 +334,7 @@ function Redact-AuditObject {
 
 function Save-ProjectsJson {
   param([string]$Body, [string[]]$JsonPaths)
-
-  $payload = $Body | ConvertFrom-Json
-  if ($null -eq $payload.projects) {
-    throw "Payload must include a projects array."
-  }
-
-  if ($null -eq $payload.meta) {
-    $payload | Add-Member -NotePropertyName meta -NotePropertyValue ([pscustomobject]@{}) -Force
-  }
-  $savedStamp = (Get-Date).ToString("o")
-  if ($payload.meta.PSObject.Properties.Name -contains "saved") {
-    $payload.meta.saved = $savedStamp
-  } else {
-    $payload.meta | Add-Member -NotePropertyName saved -NotePropertyValue $savedStamp -Force
-  }
-  $json = $payload | ConvertTo-Json -Depth 30
-  foreach ($JsonPath in ($JsonPaths | Select-Object -Unique)) {
-    Backup-Once -Path $JsonPath
-    [System.IO.File]::WriteAllText($JsonPath, $json + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
-  }
+  return Save-ProjectDataTransaction -Body $Body -ProjectsPaths $JsonPaths -AuditPaths @()
 }
 
 function Get-FileRevisionInfo {
@@ -660,6 +646,7 @@ function Get-BoardOrderSyncState {
   $audit = Get-FileSignatureInfo -Path $auditPath
   $order = Get-FileSignatureInfo -Path $orderPath
   $orderMeta = Get-BoardOrderMetadata -Path $orderPath
+  $projectFileIndex = Get-ProjectFileIndexStatus
   return [ordered]@{
     ok = $true
     canonicalAvailable = [bool]$script:TeamReachable
@@ -672,6 +659,10 @@ function Get-BoardOrderSyncState {
     boardOrderExists = [bool]$orderMeta.exists
     boardOrderWarning = [string]$orderMeta.warning
     latestAuditSignature = [string]$audit.signature
+    projectFileIndexRevision = [int]$projectFileIndex.indexRevision
+    projectFileIndexSignature = [string]$projectFileIndex.signature
+    projectFileBaselineReady = [bool]$projectFileIndex.baselineReady
+    projectFileIndexExists = [bool]$projectFileIndex.exists
     serverTime = (Get-Date).ToString('o')
   }
 }
@@ -1078,6 +1069,7 @@ function Save-CardMove {
     }
   } finally {
     if ($lockStream) { $lockStream.Dispose() }
+    if ($lockPath -and (Test-Path -LiteralPath $lockPath -PathType Leaf)) { Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue }
   }
 }
 
@@ -1432,10 +1424,13 @@ function Copy-CanonicalFileToRuntime {
 }
 
 function Sync-CanonicalToRuntime {
-  $result = @{ projectsCopied=$false; auditCopied=$false; boardOrderCopied=$false; skipped='' }
+  $result = @{ projectsCopied=$false; auditCopied=$false; projectFileIndexCopied=$false; boardOrderCopied=$false; skipped='' }
   if (-not (Update-TeamReachability)) { $result.skipped = 'team_unreachable'; return $result }
   $result.projectsCopied = Copy-CanonicalFileToRuntime -CanonicalPath $script:CanonicalProjectsPath -RuntimePath $script:RuntimeProjectsPath -Label 'projects.json'
   $result.auditCopied = Copy-CanonicalFileToRuntime -CanonicalPath $script:CanonicalAuditPath -RuntimePath $script:RuntimeAuditPath -Label 'card_updates.jsonl'
+  if (Test-Path -LiteralPath $script:CanonicalProjectFileIndexPath -PathType Leaf) {
+    $result.projectFileIndexCopied = Copy-CanonicalFileToRuntime -CanonicalPath $script:CanonicalProjectFileIndexPath -RuntimePath $script:RuntimeProjectFileIndexPath -Label 'project_file_index.json'
+  }
   if (Test-Path -LiteralPath $script:CanonicalBoardOrderPath -PathType Leaf) {
     $result.boardOrderCopied = Copy-CanonicalFileToRuntime -CanonicalPath $script:CanonicalBoardOrderPath -RuntimePath $script:RuntimeBoardOrderPath -Label 'board_order.json'
   }
@@ -1450,6 +1445,8 @@ function Get-SyncStatus {
   $audit = Get-CanonicalFileStatus -Path $script:CanonicalAuditPath
   $runtimeProjects = Get-FileRevisionInfo -Path $script:RuntimeProjectsPath
   $runtimeAudit = Get-FileRevisionInfo -Path $script:RuntimeAuditPath
+  $projectFileIndex = Get-ProjectFileIndexStatus
+  $runtimeProjectFileIndex = Get-FileRevisionInfo -Path $script:RuntimeProjectFileIndexPath
   $order = Get-CanonicalFileStatus -Path $script:CanonicalBoardOrderPath
   $runtimeOrder = Get-FileRevisionInfo -Path $script:RuntimeBoardOrderPath
   $projectFilesExists = Test-CanonicalContainerSafe -Path $script:CanonicalProjectFilesRoot
@@ -1462,6 +1459,7 @@ function Get-SyncStatus {
     teamReachable = [bool]$script:TeamReachable
     projectsJson = $projects
     cardUpdatesJsonl = $audit
+    projectFileIndexJson = $projectFileIndex
     boardOrderJson = $order
     projectFiles = @{
       path = $script:CanonicalProjectFilesRoot
@@ -1471,7 +1469,7 @@ function Get-SyncStatus {
     }
     lastChecked = (Get-Date).ToString('o')
     source = @{ projects=@{ exists=$projects.readable; path=$projects.path; lastWriteUtc=$projects.lastWriteUtc; hash=$projects.hash; length=$projects.length }; audit=@{ exists=$audit.readable; path=$audit.path; lastWriteUtc=$audit.lastWriteUtc; hash=$audit.hash; length=$audit.length } }
-    local = @{ projects=$runtimeProjects; audit=$runtimeAudit; boardOrder=$runtimeOrder }
+    local = @{ projects=$runtimeProjects; audit=$runtimeAudit; projectFileIndex=$runtimeProjectFileIndex; boardOrder=$runtimeOrder }
     synced = $SyncResult
   }
 }
@@ -1516,6 +1514,752 @@ function Append-AuditEvent {
       } finally { $stream.Dispose() }
     }
     [System.IO.File]::AppendAllText($AuditPath, $prefix + $json + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+  }
+}
+
+function Get-ObjectPropertyValue {
+  param($Object, [string]$Name)
+
+  if ($null -eq $Object) { return $null }
+  $property = $Object.PSObject.Properties[$Name]
+  if ($null -eq $property) { return $null }
+  return $property.Value
+}
+
+function Test-ObjectProperty {
+  param($Object, [string]$Name)
+
+  return $null -ne $Object -and $null -ne $Object.PSObject.Properties[$Name]
+}
+
+function Set-ObjectPropertyValue {
+  param($Object, [string]$Name, $Value)
+
+  if ($null -eq $Object) { throw "Cannot set property on a null object: $Name" }
+  if (Test-ObjectProperty -Object $Object -Name $Name) {
+    $Object.$Name = $Value
+  } else {
+    $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value
+  }
+}
+
+function Remove-ObjectPropertySafe {
+  param($Object, [string]$Name)
+
+  if (Test-ObjectProperty -Object $Object -Name $Name) {
+    $Object.PSObject.Properties.Remove($Name)
+  }
+}
+
+function Normalize-NextActionForComparison {
+  param([object]$Value)
+
+  if ($null -eq $Value) { return "" }
+  $text = [string]$Value
+  return $text.Replace("`r`n", "`n").Replace("`r", "`n").Trim()
+}
+
+function Get-ProjectNextActionValue {
+  param($Card)
+
+  if (Test-ObjectProperty -Object $Card -Name 'nextAction') {
+    return [pscustomobject]@{ present = $true; value = [string](Get-ObjectPropertyValue $Card 'nextAction') }
+  }
+  if (Test-ObjectProperty -Object $Card -Name 'next') {
+    return [pscustomobject]@{ present = $true; value = [string](Get-ObjectPropertyValue $Card 'next') }
+  }
+  return [pscustomobject]@{ present = $false; value = "" }
+}
+
+function Get-ReliableServerActor {
+  $actor = [string]$env:USERNAME
+  if ([string]::IsNullOrWhiteSpace($actor)) { return "" }
+  $actor = $actor.Trim()
+  if ($actor.Length -gt 120) { return "" }
+  if ($actor -match '(?i)(password|secret|token|apikey|session)') { return "" }
+  return $actor
+}
+
+function Get-ProjectSnapshot {
+  param($Card)
+
+  $snapshot = [ordered]@{}
+  foreach ($pair in @(
+    @('status', 'status'),
+    @('health', 'riskColour'),
+    @('owner', 'owner'),
+    @('projectLead', 'projectLead'),
+    @('reviewDate', 'reviewDate'),
+    @('blocker', 'blockerReason')
+  )) {
+    $value = Get-ObjectPropertyValue -Object $Card -Name $pair[1]
+    if ($null -ne $value -and -not [string]::IsNullOrWhiteSpace([string]$value)) {
+      $snapshot[$pair[0]] = [string]$value
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace([string]$snapshot['projectLead']) -and (Test-ObjectProperty -Object $Card -Name 'leadName')) {
+    $lead = [string](Get-ObjectPropertyValue -Object $Card -Name 'leadName')
+    if (-not [string]::IsNullOrWhiteSpace($lead)) { $snapshot['projectLead'] = $lead }
+  }
+  return $snapshot
+}
+
+function Get-ProjectCardChangedFields {
+  param($Before, $After)
+
+  $ignored = @('lastUpdated', 'updatedBy', 'projectHistory', 'projectHistorySchemaVersion')
+  $beforeKeys = if ($null -ne $Before) { @($Before.PSObject.Properties.Name) } else { @() }
+  $afterKeys = if ($null -ne $After) { @($After.PSObject.Properties.Name) } else { @() }
+  $keys = @($beforeKeys + $afterKeys | Select-Object -Unique)
+  $changed = New-Object System.Collections.Generic.List[string]
+  foreach ($key in $keys) {
+    if ($ignored -contains [string]$key) { continue }
+    $beforeValue = Get-ObjectPropertyValue -Object $Before -Name ([string]$key)
+    $afterValue = Get-ObjectPropertyValue -Object $After -Name ([string]$key)
+    $beforeJson = if ($null -eq $beforeValue) { "" } else { ConvertTo-Json $beforeValue -Depth 20 -Compress }
+    $afterJson = if ($null -eq $afterValue) { "" } else { ConvertTo-Json $afterValue -Depth 20 -Compress }
+    if ($beforeJson -ne $afterJson) { [void]$changed.Add([string]$key) }
+  }
+  return $changed.ToArray()
+}
+
+function Add-ProjectHistoryEntry {
+  param($Card, $Entry)
+
+  $existing = Get-ObjectPropertyValue -Object $Card -Name 'projectHistory'
+  if ($null -eq $existing) {
+    Set-ObjectPropertyValue -Object $Card -Name 'projectHistorySchemaVersion' -Value 1
+    Set-ObjectPropertyValue -Object $Card -Name 'projectHistory' -Value @($Entry)
+    return
+  }
+  $history = @($existing)
+  if ($history.Count -gt 0 -and $history[0] -is [string]) { throw 'projectHistory is malformed.' }
+  if (-not (Test-ObjectProperty -Object $Card -Name 'projectHistorySchemaVersion')) {
+    Set-ObjectPropertyValue -Object $Card -Name 'projectHistorySchemaVersion' -Value 1
+  }
+  Set-ObjectPropertyValue -Object $Card -Name 'projectHistory' -Value @($history + @($Entry))
+}
+
+function New-ProjectHistoryEntry {
+  param(
+    [string]$Type,
+    [string]$OccurredAt,
+    [string]$ChangeId,
+    $Card,
+    [string]$PreviousNextAction = '',
+    [bool]$HasPreviousNextAction = $false,
+    [string]$NextAction = '',
+    [bool]$HasNextAction = $false,
+    [bool]$Cleared = $false,
+    [object[]]$Files = @(),
+    [string]$ResultingProjectsRevision = ''
+  )
+
+  $entry = [ordered]@{
+    id = 'history-' + [Guid]::NewGuid().ToString('N')
+    type = $Type
+    occurredAt = $OccurredAt
+    changeId = $ChangeId
+  }
+  $actor = Get-ReliableServerActor
+  if (-not [string]::IsNullOrWhiteSpace($actor)) { $entry.actor = $actor }
+  if ($HasPreviousNextAction) { $entry.previousNextAction = $PreviousNextAction }
+  if ($HasNextAction) { $entry.nextAction = $NextAction }
+  if ($Cleared) { $entry.cleared = $true }
+  if (-not [string]::IsNullOrWhiteSpace($ResultingProjectsRevision)) { $entry.resultingProjectsRevision = $ResultingProjectsRevision }
+  $entry.snapshot = Get-ProjectSnapshot -Card $Card
+  if ($Type -eq 'project_file_added') {
+    $safeFiles = @()
+    foreach ($file in @($Files)) {
+      if ($null -eq $file) { continue }
+      $safeFiles += [ordered]@{
+        name = [string](Get-ObjectPropertyValue -Object $file -Name 'name')
+        relativePath = [string](Get-ObjectPropertyValue -Object $file -Name 'relativePath')
+        extension = [string](Get-ObjectPropertyValue -Object $file -Name 'extension')
+        friendlyType = [string](Get-ObjectPropertyValue -Object $file -Name 'friendlyType')
+        size = [int64](Get-ObjectPropertyValue -Object $file -Name 'size')
+        lastWriteTime = [string](Get-ObjectPropertyValue -Object $file -Name 'lastWriteTime')
+        fingerprint = [string](Get-ObjectPropertyValue -Object $file -Name 'fingerprint')
+      }
+    }
+    $entry.files = $safeFiles
+    $entry.fileCount = $safeFiles.Count
+    $current = Get-ProjectNextActionValue -Card $Card
+    if ($current.present -and -not [string]::IsNullOrWhiteSpace($current.value)) { $entry.currentNextAction = $current.value }
+  }
+  return [pscustomobject]$entry
+}
+
+function Get-ServerAuditEvent {
+  param(
+    $ClientEvent,
+    $Card,
+    [string]$Action,
+    [string]$OccurredAt,
+    [string]$ChangeId,
+    [string]$ProjectsRevision,
+    [string]$Subtype = ''
+  )
+
+  $event = [ordered]@{
+    timestamp = $OccurredAt
+    cardId = [string](Get-ObjectPropertyValue -Object $Card -Name 'id')
+    cardTitle = [string](Get-ObjectPropertyValue -Object $Card -Name 'title')
+    action = $Action
+    source = 'kanban-server'
+    changeId = $ChangeId
+  }
+  if (-not [string]::IsNullOrWhiteSpace($Subtype)) { $event.subtype = $Subtype }
+  if (-not [string]::IsNullOrWhiteSpace($ProjectsRevision)) { $event.projectsRevision = $ProjectsRevision }
+  $actor = Get-ReliableServerActor
+  if (-not [string]::IsNullOrWhiteSpace($actor)) { $event.actor = $actor; $event.updatedBy = $actor }
+  if ($ClientEvent -and -not [string]::IsNullOrWhiteSpace([string](Get-ObjectPropertyValue -Object $ClientEvent -Name 'note'))) {
+    $event.note = [string](Get-ObjectPropertyValue -Object $ClientEvent -Name 'note')
+  }
+  if ($ClientEvent -and -not [string]::IsNullOrWhiteSpace([string](Get-ObjectPropertyValue -Object $ClientEvent -Name 'type'))) {
+    $event.type = [string](Get-ObjectPropertyValue -Object $ClientEvent -Name 'type')
+  }
+  if ($ClientEvent -and -not [string]::IsNullOrWhiteSpace([string](Get-ObjectPropertyValue -Object $ClientEvent -Name 'summary'))) {
+    $event.summary = [string](Get-ObjectPropertyValue -Object $ClientEvent -Name 'summary')
+  }
+  foreach ($field in @('before', 'after', 'details')) {
+    $value = Get-ObjectPropertyValue -Object $ClientEvent -Name $field
+    if ($null -ne $value) { $event[$field] = Redact-AuditObject $value }
+  }
+  return (Redact-AuditObject $event)
+}
+
+function Commit-ProjectDataFiles {
+  param(
+    [string]$ProjectsText,
+    [string[]]$ProjectsPaths,
+    [string]$AuditText,
+    [string[]]$AuditPaths,
+    [string]$IndexText = '',
+    [string[]]$IndexPaths = @()
+  )
+
+  $specs = New-Object System.Collections.Generic.List[object]
+  if (-not [string]::IsNullOrWhiteSpace($ProjectsText)) {
+    foreach ($path in @($ProjectsPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+      [void]$specs.Add([pscustomobject]@{ path = $path; text = $ProjectsText })
+    }
+  }
+  if ($null -ne $AuditText) {
+    foreach ($path in @($AuditPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+      [void]$specs.Add([pscustomobject]@{ path = $path; text = $AuditText })
+    }
+  }
+  if (-not [string]::IsNullOrWhiteSpace($IndexText)) {
+    foreach ($path in @($IndexPaths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)) {
+      [void]$specs.Add([pscustomobject]@{ path = $path; text = $IndexText })
+    }
+  }
+  $previous = @{}
+  foreach ($spec in $specs) {
+    $key = [System.IO.Path]::GetFullPath($spec.path).ToLowerInvariant()
+    if ($previous.ContainsKey($key)) { continue }
+    $exists = Test-Path -LiteralPath $spec.path -PathType Leaf
+    $previous[$key] = [pscustomobject]@{ exists = $exists; text = if ($exists) { [System.IO.File]::ReadAllText($spec.path, [System.Text.Encoding]::UTF8) } else { '' } }
+  }
+  try {
+    foreach ($spec in $specs) {
+      Backup-Once -Path $spec.path
+      Write-AtomicUtf8TextFile -Path $spec.path -Text $spec.text
+    }
+  } catch {
+    foreach ($spec in ($specs | Select-Object -Unique -Property path)) {
+      $key = [System.IO.Path]::GetFullPath($spec.path).ToLowerInvariant()
+      $prior = $previous[$key]
+      if ($null -ne $prior) {
+        Restore-TransactionFile -Path $spec.path -PreviouslyExists ([bool]$prior.exists) -PreviousText ([string]$prior.text)
+      }
+    }
+    throw
+  }
+}
+
+function Save-ProjectDataTransaction {
+  param(
+    [string]$Body,
+    [string[]]$ProjectsPaths,
+    [string[]]$AuditPaths
+  )
+
+  $payload = $Body | ConvertFrom-Json
+  if ($null -eq $payload -or -not (Test-ObjectProperty -Object $payload -Name 'projects')) { throw 'Payload must include a projects array.' }
+  if ($payload.projects -isnot [System.Collections.IEnumerable] -or $payload.projects -is [string]) { throw 'Payload projects must be an array.' }
+  $authorityProjectsPath = if ($script:TeamReachable) { $script:CanonicalProjectsPath } else { $script:RuntimeProjectsPath }
+  $authorityAuditPath = if ($script:TeamReachable) { $script:CanonicalAuditPath } else { $script:RuntimeAuditPath }
+  if (-not (Test-Path -LiteralPath $authorityProjectsPath -PathType Leaf)) { throw 'Canonical projects source is unavailable.' }
+
+  $canonicalPayload = Get-Content -LiteralPath $authorityProjectsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ($null -eq $canonicalPayload -or $null -eq $canonicalPayload.projects) { throw 'Canonical projects source is malformed.' }
+  $canonicalCards = @($canonicalPayload.projects)
+  $canonicalById = @{}
+  foreach ($canonicalCard in $canonicalCards) {
+    $canonicalId = [string](Get-ObjectPropertyValue -Object $canonicalCard -Name 'id')
+    if ([string]::IsNullOrWhiteSpace($canonicalId)) { throw 'Canonical project card is missing an ID.' }
+    if ($canonicalById.ContainsKey($canonicalId)) { throw "Duplicate canonical project ID: $canonicalId" }
+    $canonicalById[$canonicalId] = $canonicalCard
+  }
+
+  $incomingCards = @($payload.projects)
+  $incomingIds = @{}
+  foreach ($incomingCard in $incomingCards) {
+    if ($null -eq $incomingCard) { throw 'Payload contains a null project card.' }
+    $incomingId = [string](Get-ObjectPropertyValue -Object $incomingCard -Name 'id')
+    if ([string]::IsNullOrWhiteSpace($incomingId)) { throw 'Every project card must include a nonblank ID.' }
+    if ($incomingIds.ContainsKey($incomingId)) { throw "Duplicate project ID: $incomingId" }
+    $incomingIds[$incomingId] = $true
+  }
+
+  $occurredAt = [DateTimeOffset]::Now.ToString('o')
+  $actor = Get-ReliableServerActor
+  $changeId = [Guid]::NewGuid().ToString()
+  $mergedCards = New-Object System.Collections.Generic.List[object]
+  $changedCards = New-Object System.Collections.Generic.List[object]
+  $historyChanges = New-Object System.Collections.Generic.List[object]
+
+  foreach ($incomingCard in $incomingCards) {
+    $cardId = [string](Get-ObjectPropertyValue -Object $incomingCard -Name 'id')
+    $existingCard = if ($canonicalById.ContainsKey($cardId)) { $canonicalById[$cardId] } else { $null }
+    $before = if ($null -ne $existingCard) { $existingCard | ConvertTo-Json -Depth 50 -Compress } else { '' }
+    $beforeNext = if ($null -ne $existingCard) { Get-ProjectNextActionValue -Card $existingCard } else { [pscustomobject]@{ present = $false; value = '' } }
+    $merged = if ($null -ne $existingCard) { $existingCard } else { [pscustomobject]@{} }
+    foreach ($property in @($incomingCard.PSObject.Properties)) {
+      $name = [string]$property.Name
+      if ($name -in @('projectHistory', 'projectHistorySchemaVersion', 'lastUpdated', 'updatedBy')) { continue }
+      Set-ObjectPropertyValue -Object $merged -Name $name -Value $property.Value
+    }
+    $incomingNext = Get-ProjectNextActionValue -Card $incomingCard
+    $afterBeforeServerFields = $merged | ConvertTo-Json -Depth 50 -Compress
+    $changedFields = @(if ($null -eq $existingCard) { 'card_created' } else { Get-ProjectCardChangedFields -Before ($before | ConvertFrom-Json) -After ($afterBeforeServerFields | ConvertFrom-Json) })
+    $hasCardChange = $null -eq $existingCard -or $changedFields.Count -gt 0
+
+    $historyType = ''
+    if ($incomingNext.present) {
+      $previousValue = if ($beforeNext.present) { [string]$beforeNext.value } else { '' }
+      $nextValue = [string]$incomingNext.value
+      $previousComparable = Normalize-NextActionForComparison $previousValue
+      $nextComparable = Normalize-NextActionForComparison $nextValue
+      if ($null -eq $existingCard) {
+        if (-not [string]::IsNullOrWhiteSpace($nextComparable)) { $historyType = 'next_action_set' }
+      } elseif ($previousComparable.Length -eq 0 -and $nextComparable.Length -gt 0) {
+        $historyType = 'next_action_set'
+      } elseif ($previousComparable.Length -gt 0 -and $nextComparable.Length -eq 0) {
+        $historyType = 'next_action_cleared'
+      } elseif ($previousComparable.Length -gt 0 -and $nextComparable.Length -gt 0 -and $previousComparable -ne $nextComparable) {
+        $historyType = 'next_action_changed'
+      }
+    }
+
+    if ($hasCardChange) {
+      Set-ObjectPropertyValue -Object $merged -Name 'lastUpdated' -Value $occurredAt
+      if (-not [string]::IsNullOrWhiteSpace($actor)) { Set-ObjectPropertyValue -Object $merged -Name 'updatedBy' -Value $actor }
+      [void]$changedCards.Add([pscustomobject]@{ id = $cardId; card = $merged; existing = $existingCard; fields = @($changedFields); historyType = $historyType; beforeNext = $beforeNext; incomingNext = $incomingNext })
+      if (-not [string]::IsNullOrWhiteSpace($historyType)) { [void]$historyChanges.Add([pscustomobject]@{ card = $merged; type = $historyType; beforeNext = $beforeNext; incomingNext = $incomingNext }) }
+    }
+    [void]$mergedCards.Add($merged)
+  }
+
+  foreach ($canonicalCard in $canonicalCards) {
+    $canonicalId = [string](Get-ObjectPropertyValue -Object $canonicalCard -Name 'id')
+    if (-not $incomingIds.ContainsKey($canonicalId)) { [void]$mergedCards.Add($canonicalCard) }
+  }
+
+  if ($changedCards.Count -eq 0) {
+    $revision = Get-FileRevisionInfo -Path $authorityProjectsPath
+    return [ordered]@{ ok = $true; committed = $false; idempotent = $true; changeId = ''; projectsRevision = [string]$revision.lastWriteUtc; projectsSignature = [string]$revision.hash; canonicalProjects = $canonicalPayload; projects = @($canonicalPayload.projects) }
+  }
+
+  if ($null -eq $canonicalPayload.meta) { Set-ObjectPropertyValue -Object $canonicalPayload -Name 'meta' -Value ([pscustomobject]@{}) }
+  Set-ObjectPropertyValue -Object $canonicalPayload.meta -Name 'saved' -Value $occurredAt
+  Set-ObjectPropertyValue -Object $canonicalPayload -Name 'projects' -Value $mergedCards.ToArray()
+
+  $historyAuditEvents = New-Object System.Collections.Generic.List[object]
+  foreach ($historyChange in $historyChanges) {
+    $previous = $historyChange.beforeNext
+    $incoming = $historyChange.incomingNext
+    $entry = New-ProjectHistoryEntry -Type ([string]$historyChange.type) -OccurredAt $occurredAt -ChangeId $changeId -Card $historyChange.card -PreviousNextAction ([string]$previous.value) -HasPreviousNextAction ([bool]$previous.present -and -not [string]::IsNullOrWhiteSpace([string]$previous.value)) -NextAction ([string]$incoming.value) -HasNextAction ($historyChange.type -ne 'next_action_cleared') -Cleared ($historyChange.type -eq 'next_action_cleared') -ResultingProjectsRevision $occurredAt
+    Add-ProjectHistoryEntry -Card $historyChange.card -Entry $entry
+    $subtype = switch ([string]$historyChange.type) { 'next_action_set' { 'set'; break } 'next_action_changed' { 'changed'; break } 'next_action_cleared' { 'cleared'; break } default { 'set' } }
+    [void]$historyAuditEvents.Add((Get-ServerAuditEvent -ClientEvent $null -Card $historyChange.card -Action 'next_action_recorded' -OccurredAt $occurredAt -ChangeId $changeId -ProjectsRevision $occurredAt -Subtype $subtype))
+  }
+
+  $clientAudits = @()
+  if (Test-ObjectProperty -Object $payload -Name 'auditEvents') { $clientAudits = @($payload.auditEvents) }
+  elseif (Test-ObjectProperty -Object $payload -Name 'auditEvent') { $clientAudits = @($payload.auditEvent) }
+  $auditEvents = New-Object System.Collections.Generic.List[object]
+  foreach ($changed in $changedCards) {
+    $matching = @($clientAudits | Where-Object { [string](Get-ObjectPropertyValue -Object $_ -Name 'cardId') -eq [string]$changed.id })
+    if ($matching.Count -eq 0) {
+      [void]$auditEvents.Add((Get-ServerAuditEvent -ClientEvent $null -Card $changed.card -Action 'save_update' -OccurredAt $occurredAt -ChangeId $changeId -ProjectsRevision $occurredAt))
+    } else {
+      foreach ($clientEvent in $matching) {
+        $action = [string](Get-ObjectPropertyValue -Object $clientEvent -Name 'action')
+        if ([string]::IsNullOrWhiteSpace($action)) { $action = 'save_update' }
+        [void]$auditEvents.Add((Get-ServerAuditEvent -ClientEvent $clientEvent -Card $changed.card -Action $action -OccurredAt $occurredAt -ChangeId $changeId -ProjectsRevision $occurredAt))
+      }
+    }
+  }
+  foreach ($historyAuditEvent in $historyAuditEvents) { [void]$auditEvents.Add($historyAuditEvent) }
+
+  $projectsText = ($canonicalPayload | ConvertTo-Json -Depth 50) + [Environment]::NewLine
+  $auditText = if (Test-Path -LiteralPath $authorityAuditPath -PathType Leaf) { [System.IO.File]::ReadAllText($authorityAuditPath, [System.Text.Encoding]::UTF8) } else { '' }
+  foreach ($auditEvent in $auditEvents) {
+    $line = (ConvertTo-Json (Redact-AuditObject $auditEvent) -Depth 40 -Compress)
+    if ($auditText.Length -gt 0 -and -not $auditText.EndsWith("`n") -and -not $auditText.EndsWith("`r")) { $auditText += [Environment]::NewLine }
+    $auditText += $line + [Environment]::NewLine
+  }
+  $auditPathsForCommit = if ($auditEvents.Count -gt 0) { $AuditPaths } else { @() }
+  Commit-ProjectDataFiles -ProjectsText $projectsText -ProjectsPaths $ProjectsPaths -AuditText $(if ($auditEvents.Count -gt 0) { $auditText } else { $null }) -AuditPaths $auditPathsForCommit
+  $revisionAfter = Get-FileRevisionInfo -Path $authorityProjectsPath
+  $updatedCard = $null
+  if ($clientAudits.Count -gt 0) { $targetId = [string](Get-ObjectPropertyValue -Object $clientAudits[0] -Name 'cardId'); $updatedCard = @($canonicalPayload.projects | Where-Object { [string]$_.id -eq $targetId } | Select-Object -First 1) }
+  if ($null -eq $updatedCard -and $changedCards.Count -gt 0) { $updatedCard = @($canonicalPayload.projects | Where-Object { [string]$_.id -eq [string]$changedCards[0].id } | Select-Object -First 1) }
+  return [ordered]@{
+    ok = $true
+    committed = $true
+    idempotent = $false
+    changeId = $changeId
+    projectsRevision = [string]$revisionAfter.lastWriteUtc
+    projectsSignature = [string]$revisionAfter.hash
+    canonicalProjects = $canonicalPayload
+    projects = @($canonicalPayload.projects)
+    card = if ($updatedCard) { $updatedCard[0] } else { $null }
+    historyEvents = @($historyChanges | ForEach-Object { $card = $_.card; @($card.projectHistory) | Select-Object -Last 1 })
+    auditEvents = $auditEvents.ToArray()
+  }
+}
+
+function Test-ProjectFileIndexPayload {
+  param($Payload)
+
+  if ($null -eq $Payload -or -not (Test-ObjectProperty -Object $Payload -Name 'cards')) { return $false }
+  $cards = Get-ObjectPropertyValue -Object $Payload -Name 'cards'
+  return ($cards -is [System.Array]) -or ($cards -is [pscustomobject])
+}
+
+function Get-ProjectFileIndexEntries {
+  param($Payload)
+
+  if (-not (Test-ProjectFileIndexPayload -Payload $Payload)) { return @() }
+  $cards = Get-ObjectPropertyValue -Object $Payload -Name 'cards'
+  if ($cards -is [System.Array]) {
+    return @($cards | Where-Object { $null -ne $_ } | ForEach-Object {
+      [pscustomobject]@{ key = [string](Get-ObjectPropertyValue -Object $_ -Name 'cardId'); entry = $_ }
+    })
+  }
+  $result = New-Object System.Collections.Generic.List[object]
+  foreach ($property in @($cards.PSObject.Properties)) {
+    if ($null -eq $property.Value) { continue }
+    [void]$result.Add([pscustomobject]@{ key = [string]$property.Name; entry = $property.Value })
+  }
+  return $result.ToArray()
+}
+
+function Get-ProjectFileIndexEntry {
+  param($Payload, [string]$CardId)
+
+  foreach ($item in @(Get-ProjectFileIndexEntries -Payload $Payload)) {
+    $entryCardId = [string](Get-ObjectPropertyValue -Object $item.entry -Name 'cardId')
+    if ($item.key -eq $CardId -or $entryCardId -eq $CardId) { return $item.entry }
+  }
+  return $null
+}
+
+function New-ProjectFileIndexEntry {
+  param($Card, [string]$RelativePath)
+
+  return [pscustomobject][ordered]@{
+    cardId = [string](Get-ObjectPropertyValue -Object $Card -Name 'id')
+    title = [string](Get-ObjectPropertyValue -Object $Card -Name 'title')
+    folderRelativePath = $RelativePath
+    fileCount = 0
+    adminCount = 0
+    planningCount = 0
+    deliveryCount = 0
+    meetingsCount = 0
+    risksIssuesDecisionsCount = 0
+    evidenceCount = 0
+    closeoutCount = 0
+    needsReviewCount = 0
+    files = @()
+  }
+}
+
+function Set-ProjectFileIndexEntry {
+  param($Payload, [string]$CardId, $Entry)
+
+  $cards = Get-ObjectPropertyValue -Object $Payload -Name 'cards'
+  if ($cards -is [System.Array]) {
+    $array = @($cards)
+    $index = -1
+    for ($i = 0; $i -lt $array.Count; $i++) {
+      $entryId = [string](Get-ObjectPropertyValue -Object $array[$i] -Name 'cardId')
+      if ($entryId -eq $CardId) { $index = $i; break }
+    }
+    if ($index -ge 0) { $array[$index] = $Entry } else { $array += $Entry }
+    Set-ObjectPropertyValue -Object $Payload -Name 'cards' -Value $array
+    return
+  }
+  if (Test-ObjectProperty -Object $cards -Name $CardId) { $cards.$CardId = $Entry }
+  else { $cards | Add-Member -NotePropertyName $CardId -NotePropertyValue $Entry }
+}
+
+function Get-FileFriendlyType {
+  param([string]$Extension)
+
+  switch ($Extension.ToLowerInvariant()) {
+    '.xlsx' { return 'Excel workbook' }
+    '.xls' { return 'Excel workbook' }
+    '.xlsm' { return 'Excel workbook' }
+    '.docx' { return 'Word document' }
+    '.doc' { return 'Word document' }
+    '.pdf' { return 'PDF document' }
+    '.pptx' { return 'PowerPoint presentation' }
+    '.ppt' { return 'PowerPoint presentation' }
+    '.msg' { return 'Outlook message' }
+    '.eml' { return 'Email message' }
+    '.txt' { return 'Text document' }
+    '.md' { return 'Markdown document' }
+    '.csv' { return 'CSV data file' }
+    '.png' { return 'PNG image' }
+    '.jpg' { return 'JPEG image' }
+    '.jpeg' { return 'JPEG image' }
+    '.zip' { return 'ZIP archive' }
+    default { return if ([string]::IsNullOrWhiteSpace($Extension)) { 'File' } else { ($Extension.TrimStart('.').ToUpperInvariant() + ' file') } }
+  }
+}
+
+function Test-IgnoredProjectFile {
+  param($File, [string]$RelativePath)
+
+  $name = [string]$File.Name
+  $extension = [string]$File.Extension
+  if ($File.Attributes -band [System.IO.FileAttributes]::Hidden) { return $true }
+  if ($name -like '~$*') { return $true }
+  if ($extension.ToLowerInvariant() -in @('.tmp', '.temp', '.partial', '.crdownload', '.download', '.lock', '.bak', '.swp')) { return $true }
+  if ($name -match '(?i)(^|[._ -])(backup|copy|transaction)([._ -]|$)') { return $true }
+  if ($RelativePath -match '(?i)(^|/)(deployment[_ -]?backup|backups?|logs?)(/|$)') { return $true }
+  return $false
+}
+
+function Get-ProjectFolderInventory {
+  param([string]$FolderPath, [string]$FolderRelativePath, [string]$CardId)
+
+  $items = @()
+  if (-not (Test-Path -LiteralPath $FolderPath -PathType Container)) { return @() }
+  try { $items = @(Get-ChildItem -LiteralPath $FolderPath -File -Recurse -Force -ErrorAction Stop) } catch { return @() }
+  $result = New-Object System.Collections.Generic.List[object]
+  foreach ($item in $items) {
+    $relative = [string]$item.FullName
+    if ($relative.StartsWith($FolderPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+      $relative = $relative.Substring($FolderPath.Length).TrimStart('\', '/')
+    }
+    $relative = $relative.Replace('\', '/')
+    if (Test-IgnoredProjectFile -File $item -RelativePath $relative) { continue }
+    $lastWrite = $item.LastWriteTimeUtc.ToString('o')
+    $extension = [string]$item.Extension
+    $fingerprint = Get-Sha256Hex ("$CardId|$relative|$($item.Length)|$lastWrite")
+    [void]$result.Add([pscustomobject][ordered]@{
+      name = [string]$item.Name
+      relativePath = $relative
+      extension = $extension
+      friendlyType = Get-FileFriendlyType -Extension $extension
+      size = [int64]$item.Length
+      lastWriteTime = $lastWrite
+      fingerprint = $fingerprint
+      folderRelativePath = $FolderRelativePath
+    })
+  }
+  return @($result | Sort-Object relativePath)
+}
+
+function Get-ProjectFolderSignature {
+  param($Files)
+
+  $parts = @($Files | ForEach-Object { "$(Get-ObjectPropertyValue -Object $_ -Name 'relativePath')|$(Get-ObjectPropertyValue -Object $_ -Name 'size')|$(Get-ObjectPropertyValue -Object $_ -Name 'lastWriteTime')" })
+  return Get-Sha256Hex (($parts | Sort-Object) -join "`n")
+}
+
+function Test-ProjectFileStableAccess {
+  param([string]$Path)
+
+  try {
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    $stream.Dispose()
+    return $true
+  } catch { return $false }
+}
+
+function Get-ProjectFileIndexStatus {
+  $path = $script:CanonicalProjectFileIndexPath
+  $revision = Get-FileSignatureInfo -Path $path
+  $baselineReady = $false
+  $indexRevision = 0
+  if ($revision.exists) {
+    try {
+      $payload = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+      $baselineReady = Test-ObjectProperty -Object $payload -Name 'fileBaselineCompletedAt' -and -not [string]::IsNullOrWhiteSpace([string](Get-ObjectPropertyValue -Object $payload -Name 'fileBaselineCompletedAt'))
+      $rawRevision = Get-ObjectPropertyValue -Object $payload -Name 'indexRevision'
+      if ($null -ne $rawRevision) { [void][int]::TryParse([string]$rawRevision, [ref]$indexRevision) }
+    } catch { }
+  }
+  return [ordered]@{ exists = [bool]$revision.exists; path = $path; lastWriteUtc = [string]$revision.lastWriteUtc; signature = [string]$revision.signature; length = [int64]$revision.length; baselineReady = [bool]$baselineReady; indexRevision = [int]$indexRevision }
+}
+
+function Invoke-ProjectFileScan {
+  param([switch]$Force)
+
+  $empty = [ordered]@{ changed = $false; addedCount = 0; deferredCount = 0; baselineRequired = $false; unmappedFolders = 0; skipped = '' }
+  if (-not $script:TeamReachable) { $empty.skipped = 'team_unreachable'; return $empty }
+  if ($script:ProjectFileScanState.lastScan -and -not $Force -and ((Get-Date) - $script:ProjectFileScanState.lastScan).TotalSeconds -lt 7) { $empty.skipped = 'rate_limited'; return $empty }
+  $script:ProjectFileScanState.lastScan = Get-Date
+  $lockStream = $null
+  try {
+    $lockPath = $script:CanonicalProjectFileIndexPath + '.scan.lock'
+    $lockStream = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+  } catch {
+    $empty.skipped = 'scan_busy'
+    return $empty
+  }
+  try {
+    $projectsPath = $script:CanonicalProjectsPath
+    $indexPath = $script:CanonicalProjectFileIndexPath
+    if (-not (Test-Path -LiteralPath $projectsPath -PathType Leaf) -or -not (Test-Path -LiteralPath $indexPath -PathType Leaf)) { $empty.skipped = 'source_missing'; return $empty }
+    $projectsPayload = Get-Content -LiteralPath $projectsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $indexPayload = Get-Content -LiteralPath $indexPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($null -eq $projectsPayload.projects -or -not (Test-ProjectFileIndexPayload -Payload $indexPayload)) { $empty.skipped = 'invalid_index'; return $empty }
+    $indexStatus = Get-ProjectFileIndexStatus
+    if (-not $indexStatus.baselineReady) { $empty.baselineRequired = $true; $empty.skipped = 'baseline_required'; return $empty }
+
+    $cards = @($projectsPayload.projects)
+    $mapped = @{}
+    foreach ($card in $cards) {
+      $folder = Get-ObjectPropertyValue -Object $card -Name 'folder'
+      $relative = [string](Get-ObjectPropertyValue -Object $folder -Name 'relativePath')
+      if ([string]::IsNullOrWhiteSpace($relative) -or $relative -notmatch '^project_files/[A-Za-z0-9][A-Za-z0-9_-]*$') { continue }
+      $key = $relative.ToLowerInvariant()
+      if ($mapped.ContainsKey($key)) { $mapped[$key] = $null } else { $mapped[$key] = $card }
+    }
+    $unmapped = 0
+    if (Test-Path -LiteralPath $script:CanonicalProjectFilesRoot -PathType Container) {
+      foreach ($folder in @(Get-ChildItem -LiteralPath $script:CanonicalProjectFilesRoot -Directory -Force -ErrorAction SilentlyContinue)) {
+        $relative = 'project_files/' + [string]$folder.Name
+        $key = $relative.ToLowerInvariant()
+        if (-not $mapped.ContainsKey($key) -or $null -eq $mapped[$key]) { $unmapped++ }
+      }
+    }
+    $empty.unmappedFolders = $unmapped
+    $groups = @{}
+    $indexChanged = $false
+    $folderChanged = @{}
+    foreach ($mapping in @($mapped.GetEnumerator())) {
+      if ($null -eq $mapping.Value) { continue }
+      $card = $mapping.Value
+      $cardId = [string](Get-ObjectPropertyValue -Object $card -Name 'id')
+      $folderRelative = [string](Get-ObjectPropertyValue -Object (Get-ObjectPropertyValue -Object $card -Name 'folder') -Name 'relativePath')
+      $folderPath = Join-Path $script:CanonicalRoot $folderRelative.Replace('/', '\')
+      $files = Get-ProjectFolderInventory -FolderPath $folderPath -FolderRelativePath $folderRelative -CardId $cardId
+      $signature = Get-ProjectFolderSignature -Files $files
+      $priorSignature = if ($script:ProjectFileScanState.folderSignatures.ContainsKey($cardId)) { [string]$script:ProjectFileScanState.folderSignatures[$cardId] } else { '' }
+      $script:ProjectFileScanState.folderSignatures[$cardId] = $signature
+      $pendingCandidates = @($script:ProjectFileScanState.candidates.Values | Where-Object { [string]$_.cardId -eq $cardId })
+      $pendingCandidate = $pendingCandidates.Count -gt 0
+      if (-not $Force -and $priorSignature -and $priorSignature -eq $signature -and -not $pendingCandidate) { continue }
+      $entry = Get-ProjectFileIndexEntry -Payload $indexPayload -CardId $cardId
+      if ($null -eq $entry) { $entry = New-ProjectFileIndexEntry -Card $card -RelativePath $folderRelative; Set-ProjectFileIndexEntry -Payload $indexPayload -CardId $cardId -Entry $entry; $indexChanged = $true }
+      if (-not (Test-ObjectProperty -Object $entry -Name 'files')) { Set-ObjectPropertyValue -Object $entry -Name 'files' -Value @(); $indexChanged = $true }
+      $knownFiles = @((Get-ObjectPropertyValue -Object $entry -Name 'files') | Where-Object { $null -ne $_ })
+      $knownByFingerprint = @{}; $knownByPath = @{}
+      foreach ($known in $knownFiles) {
+        $fp = [string](Get-ObjectPropertyValue -Object $known -Name 'fingerprint'); $path = [string](Get-ObjectPropertyValue -Object $known -Name 'relativePath')
+        if ($fp) { $knownByFingerprint[$fp] = $known }; if ($path) { $knownByPath[$path.ToLowerInvariant()] = $known }
+      }
+      $currentByPath = @{}; foreach ($file in $files) { $currentByPath[[string]$file.relativePath.ToLowerInvariant()] = $file }
+      $removed = @($knownFiles | Where-Object { $p = [string](Get-ObjectPropertyValue -Object $_ -Name 'relativePath'); -not $currentByPath.ContainsKey($p.ToLowerInvariant()) })
+      $nextFiles = New-Object System.Collections.Generic.List[object]
+      $added = New-Object System.Collections.Generic.List[object]
+      foreach ($file in $files) {
+        $pathKey = [string]$file.relativePath.ToLowerInvariant(); $fp = [string]$file.fingerprint
+        $record = if ($knownByPath.ContainsKey($pathKey)) { $knownByPath[$pathKey] } elseif ($knownByFingerprint.ContainsKey($fp)) { $knownByFingerprint[$fp] } else { $null }
+        $rename = $false
+        if ($null -eq $record) {
+          foreach ($old in $removed) {
+            if ([int64](Get-ObjectPropertyValue -Object $old -Name 'size') -eq [int64]$file.size -and [string](Get-ObjectPropertyValue -Object $old -Name 'lastWriteTime') -eq [string]$file.lastWriteTime) { $record = $old; $rename = $true; break }
+          }
+        }
+        if ($null -eq $record) {
+          $candidate = if ($script:ProjectFileScanState.candidates.ContainsKey($fp)) { $script:ProjectFileScanState.candidates[$fp] } else { $null }
+          if ($null -eq $candidate -or [string]$candidate.relativePath -ne [string]$file.relativePath -or [int64]$candidate.size -ne [int64]$file.size -or [string]$candidate.lastWriteTime -ne [string]$file.lastWriteTime) {
+            $script:ProjectFileScanState.candidates[$fp] = [pscustomobject]@{ cardId = $cardId; relativePath = $file.relativePath; size = $file.size; lastWriteTime = $file.lastWriteTime; firstSeen = (Get-Date).ToString('o') }
+            $empty.deferredCount++
+            continue
+          }
+          if (-not (Test-ProjectFileStableAccess -Path (Join-Path $folderPath ([string]$file.relativePath).Replace('/', '\')))) { $empty.deferredCount++; continue }
+          [void]$added.Add($file); $record = $file; $script:ProjectFileScanState.candidates.Remove($fp)
+        }
+        if ($rename) { $indexChanged = $true; $record = $file }
+        [void]$nextFiles.Add($record)
+      }
+      $nextFileArray = @($nextFiles.ToArray())
+      $knownFileArray = @($knownFiles)
+      $nextFilesJson = ConvertTo-Json -InputObject $nextFileArray -Depth 20 -Compress
+      $knownFilesJson = ConvertTo-Json -InputObject $knownFileArray -Depth 20 -Compress
+      if ($nextFileArray.Count -ne $knownFileArray.Count -or $nextFilesJson -ne $knownFilesJson) { $indexChanged = $true }
+      Set-ObjectPropertyValue -Object $entry -Name 'files' -Value $nextFileArray
+      Set-ObjectPropertyValue -Object $entry -Name 'cardId' -Value $cardId
+      Set-ObjectPropertyValue -Object $entry -Name 'title' -Value ([string](Get-ObjectPropertyValue -Object $card -Name 'title'))
+      Set-ObjectPropertyValue -Object $entry -Name 'folderRelativePath' -Value $folderRelative
+      $counts = @{ fileCount = $nextFileArray.Count; adminCount = 0; planningCount = 0; deliveryCount = 0; meetingsCount = 0; risksIssuesDecisionsCount = 0; evidenceCount = 0; closeoutCount = 0 }
+      foreach ($file in $nextFileArray) {
+        $path = [string]$file.relativePath
+        if ($path -match '^(00_Admin)(/|$)') { $counts.adminCount++ }
+        elseif ($path -match '^(01_Planning)(/|$)') { $counts.planningCount++ }
+        elseif ($path -match '^(02_Delivery)(/|$)') { $counts.deliveryCount++ }
+        elseif ($path -match '^(03_Meetings)(/|$)') { $counts.meetingsCount++ }
+        elseif ($path -match '^(04_Risks-Issues-Decisions)(/|$)') { $counts.risksIssuesDecisionsCount++ }
+        elseif ($path -match '^(05_Evidence)(/|$)') { $counts.evidenceCount++ }
+        elseif ($path -match '^(06_Closeout)(/|$)') { $counts.closeoutCount++ }
+      }
+      foreach ($name in $counts.Keys) { Set-ObjectPropertyValue -Object $entry -Name $name -Value $counts[$name] }
+      if ($added.Count -gt 0) { $groups[$cardId] = [pscustomobject]@{ card = $card; files = $added.ToArray() }; $empty.addedCount += $added.Count }
+    }
+    if (-not $indexChanged -and $groups.Count -eq 0) { return $empty }
+    $occurredAt = [DateTimeOffset]::Now.ToString('o'); $changeId = [Guid]::NewGuid().ToString(); $historyEvents = New-Object System.Collections.Generic.List[object]; $auditEvents = New-Object System.Collections.Generic.List[object]
+    if ($groups.Count -gt 0) {
+      $projectById = @{}; foreach ($card in @($projectsPayload.projects)) { $projectById[[string]$card.id] = $card }
+      foreach ($group in @($groups.GetEnumerator())) {
+        $card = $projectById[[string]$group.Key]; if ($null -eq $card) { continue }
+        $entry = New-ProjectHistoryEntry -Type 'project_file_added' -OccurredAt $occurredAt -ChangeId $changeId -Card $card -Files @($group.Value.files) -ResultingProjectsRevision $occurredAt
+        Add-ProjectHistoryEntry -Card $card -Entry $entry; [void]$historyEvents.Add($entry)
+        $audit = Get-ServerAuditEvent -ClientEvent $null -Card $card -Action 'project_file_added' -OccurredAt $occurredAt -ChangeId $changeId -ProjectsRevision $occurredAt
+        $auditFileList = @($group.Value.files | ForEach-Object { [ordered]@{ name = $_.name; relativePath = $_.relativePath; extension = $_.extension; friendlyType = $_.friendlyType; size = $_.size; lastWriteTime = $_.lastWriteTime } }); $audit.files = $auditFileList; $audit.fileCount = $auditFileList.Count
+        [void]$auditEvents.Add($audit)
+      }
+      if ($null -eq $projectsPayload.meta) { Set-ObjectPropertyValue -Object $projectsPayload -Name 'meta' -Value ([pscustomobject]@{}) }
+      Set-ObjectPropertyValue -Object $projectsPayload.meta -Name 'saved' -Value $occurredAt
+    }
+    $indexRevision = 0; $rawIndexRevision = Get-ObjectPropertyValue -Object $indexPayload -Name 'indexRevision'; if ($null -ne $rawIndexRevision) { [void][int]::TryParse([string]$rawIndexRevision, [ref]$indexRevision) }
+    Set-ObjectPropertyValue -Object $indexPayload -Name 'indexRevision' -Value ($indexRevision + 1)
+    Set-ObjectPropertyValue -Object $indexPayload -Name 'generatedAt' -Value $occurredAt
+    $projectsText = if ($groups.Count -gt 0) { (($projectsPayload | ConvertTo-Json -Depth 50) + [Environment]::NewLine) } else { $null }
+    $auditText = if ($groups.Count -gt 0) { if (Test-Path -LiteralPath $script:CanonicalAuditPath -PathType Leaf) { [IO.File]::ReadAllText($script:CanonicalAuditPath, [Text.Encoding]::UTF8) } else { '' } } else { $null }
+    foreach ($auditEvent in $auditEvents) { if ($auditText.Length -gt 0 -and -not $auditText.EndsWith("`n") -and -not $auditText.EndsWith("`r")) { $auditText += [Environment]::NewLine }; $auditText += (ConvertTo-Json (Redact-AuditObject $auditEvent) -Depth 40 -Compress) + [Environment]::NewLine }
+    $indexText = ($indexPayload | ConvertTo-Json -Depth 50) + [Environment]::NewLine
+    $projectPaths = if ($groups.Count -gt 0) { @($script:CanonicalProjectsPath, $script:RuntimeProjectsPath) } else { @() }
+    $auditPaths = if ($groups.Count -gt 0) { @($script:CanonicalAuditPath, $script:RuntimeAuditPath) } else { @() }
+    Commit-ProjectDataFiles -ProjectsText $projectsText -ProjectsPaths $projectPaths -AuditText $auditText -AuditPaths $auditPaths -IndexText $indexText -IndexPaths @($script:CanonicalProjectFileIndexPath, $script:RuntimeProjectFileIndexPath)
+    $empty.changed = $true; $empty.changeId = $changeId; $empty.indexRevision = $indexRevision + 1; $empty.historyEventCount = $historyEvents.Count; return $empty
+  } catch {
+    Write-ServerLog "WARNING: project file scan deferred: $($_.Exception.Message)"
+    $empty.skipped = 'scan_error'
+    $empty.error = $_.Exception.Message
+    return $empty
+  } finally {
+    if ($lockStream) { $lockStream.Dispose() }
   }
 }
 
@@ -1937,11 +2681,13 @@ try {
   $script:LastTeamCheck = Get-Date
   $script:CanonicalProjectsPath = Join-Path $CanonicalRoot 'data\projects.json'
   $script:CanonicalAuditPath = Join-Path $CanonicalRoot 'data\card_updates.jsonl'
+  $script:CanonicalProjectFileIndexPath = Join-Path $CanonicalRoot 'data\project_file_index.json'
   $script:CanonicalBoardOrderPath = Join-Path $CanonicalRoot 'data\board_order.json'
   $script:CanonicalConfigPath = Join-Path $CanonicalRoot 'data\kanban_config.json'
   $script:CanonicalProjectFilesRoot = Join-Path $CanonicalRoot 'project_files'
   $script:RuntimeProjectsPath = Join-Path $Root 'data\projects.json'
   $script:RuntimeAuditPath = Join-Path $Root 'data\card_updates.jsonl'
+  $script:RuntimeProjectFileIndexPath = Join-Path $Root 'data\project_file_index.json'
   $script:RuntimeBoardOrderPath = Join-Path $Root 'data\board_order.json'
   $script:RuntimeConfigPath = Join-Path $Root 'data\kanban_config.json'
   $script:LocalProjectFilesRoot = Join-Path $LocalMirrorRoot 'project_files'
@@ -2060,10 +2806,12 @@ try {
             $authorityJsonPath = if ($script:TeamReachable) { $teamJsonPath } else { $jsonPath }
             Require-FreshProjectsSource -Request $request -SourceJsonPath $authorityJsonPath
             $savePaths = if ($script:TeamReachable) { @($teamJsonPath, $jsonPath) } else { @($jsonPath) }
-            Save-ProjectsJson -Body $requestBody -JsonPaths $savePaths
+            $auditPaths = if ($script:TeamReachable) { @($teamAuditPath, $auditPath) } else { @($auditPath) }
+            $saveResult = Save-ProjectDataTransaction -Body $requestBody -ProjectsPaths $savePaths -AuditPaths $auditPaths
             $syncStatus = Get-SyncStatus
-            Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload @{ ok = $true; syncStatus = $syncStatus }
-            Write-ServerLog "200 POST $rawPath mode=$($script:EffectiveMode) -> $($savePaths -join ', ')"
+            $saveResult.syncStatus = $syncStatus
+            Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload $saveResult
+            Write-ServerLog "200 POST $rawPath mode=$($script:EffectiveMode) committed=$($saveResult.committed) changeId=$($saveResult.changeId) -> $($savePaths -join ', ')"
             continue
           }
           if ($pathOnly -eq "/api/card-updates") {
@@ -2172,6 +2920,7 @@ try {
         continue
       }
       if ($pathOnly -eq "/api/sync-state") {
+        [void](Invoke-ProjectFileScan)
         $syncState = Get-BoardOrderSyncState
         Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload $syncState
         Write-ServerLog "200 $method $rawPath lightweight state check"
@@ -2213,7 +2962,7 @@ try {
       }
 
       if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-        if ($pathOnly -eq "/data/projects.json" -or $pathOnly -eq "/data/card_updates.jsonl") {
+        if ($pathOnly -eq "/data/projects.json" -or $pathOnly -eq "/data/card_updates.jsonl" -or $pathOnly -eq "/data/project_file_index.json") {
           [void](Sync-CanonicalToRuntime)
         }
         $body = [System.IO.File]::ReadAllBytes($candidate)

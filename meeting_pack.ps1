@@ -16,24 +16,87 @@ function Test-MeetingPackPin([string]$Pin,[string]$ConfigPath) {
 
 function Get-MeetingPackLead($p) {
   foreach($n in @('projectLead','leadName','owner')){if($p.PSObject.Properties.Name-contains$n-and-not[string]::IsNullOrWhiteSpace([string]$p.$n)){return([string]$p.$n).Trim()}}
-  if($p.people){return(@($p.people)-join', ')};'Unassigned'
+  $peopleProperty = $p.PSObject.Properties['people']
+  if($peopleProperty -and $peopleProperty.Value){return(@($peopleProperty.Value)-join', ')};'Unassigned'
+}
+
+function Get-MeetingPackProperty($Object,[string]$Name) {
+  if($null -eq $Object){return $null}
+  $property=$Object.PSObject.Properties[$Name]
+  if($property){return $property.Value}
+  return $null
 }
 
 function Get-MeetingPackStatus([string]$s) {
   switch -Regex ($s.Trim().ToLowerInvariant()){'^(todo|to do|backlog)$'{'To Do';break};'^(doing|in progress|active)$'{'In Progress';break};'^(blocked|on hold)$'{'Blocked';break};'^(done|complete|completed)$'{'Done';break};default{if($s){$s}else{'To Do'}}}
 }
 
+function Get-MeetingPackHistoryLabel($h) {
+  switch ([string]$h.type) {
+    'next_action_baseline' { 'Current next action baseline'; break }
+    'next_action_set' { 'Next action entered'; break }
+    'next_action_changed' { 'Next action updated'; break }
+    'next_action_cleared' { 'Next action cleared'; break }
+    'project_file_added' { $fileValue=Get-MeetingPackProperty $h 'fileCount';if($null -eq $fileValue){$fileValue=@(Get-MeetingPackProperty $h 'files').Count};if ([int]$fileValue -gt 1) { ([int]$fileValue).ToString() + ' project files added' } else { 'Project file added' }; break }
+    default { 'Project update' }
+  }
+}
+
+function Get-MeetingPackHistoryLines($p,[int]$Limit=5) {
+  $historyValue=Get-MeetingPackProperty $p 'projectHistory'
+  $raw = if ($historyValue -is [Array]) { @($historyValue) } elseif ($historyValue) { @($historyValue) } else { @() }
+  $ordered = @($raw | Sort-Object -Property @{Expression={try{[DateTime]$_.occurredAt}catch{[DateTime]::MinValue}};Descending=$true}, @{Expression={[string]$_.occurredAt};Descending=$true}, @{Expression={[string](Get-MeetingPackProperty $_ 'id')};Descending=$true} | Select-Object -First $Limit)
+  $lines = New-Object System.Collections.Generic.List[string]
+  foreach ($h in $ordered) {
+    $stamp = try { ([DateTime]$h.occurredAt).ToString('dd MMM yyyy, h:mm tt') } catch { 'Date unavailable' }
+    $line = $stamp + ' — ' + (Get-MeetingPackHistoryLabel $h)
+    $nextAction=Get-MeetingPackProperty $h 'nextAction';$previousNextAction=Get-MeetingPackProperty $h 'previousNextAction';$fileCount=Get-MeetingPackProperty $h 'fileCount'
+    if ($nextAction) { $line += ': ' + [string]$nextAction }
+    elseif ($previousNextAction) { $line += ': ' + [string]$previousNextAction }
+    elseif ($fileCount) { $line += ': ' + [int]$fileCount + ' file(s)' }
+    [void]$lines.Add($line)
+  }
+  return $lines.ToArray()
+}
+
 function Get-MeetingPackProjects([string]$Path,[string[]]$Ids) {
-  $root=Get-Content -LiteralPath $Path -Raw -Encoding UTF8|ConvertFrom-Json
-  $all=if($root-is[Array]){@($root)}elseif($root.PSObject.Properties.Name-contains'projects'){@($root.projects)}elseif($root.PSObject.Properties.Name-contains'cards'){@($root.cards)}else{throw 'Invalid projects data.'}
-  $map=@{};foreach($p in $all){$map[[string]$p.id]=$p};$chosen=if($Ids.Count){foreach($id in $Ids){if(-not$map.ContainsKey($id)){throw "Project was not found: $id"};$map[$id]}}else{$all}
-  @($chosen|ForEach-Object{[pscustomobject]@{id=[string]$_.id;name=[string]$_.title;nextAction=$(if(-not[string]::IsNullOrWhiteSpace([string]$_.nextAction)){[string]$_.nextAction}elseif(-not[string]::IsNullOrWhiteSpace([string]$_.next)){[string]$_.next}else{'No next action recorded'});status=Get-MeetingPackStatus([string]$_.status);lead=Get-MeetingPackLead $_;update=$(if(-not[string]::IsNullOrWhiteSpace([string]$_.context)){[string]$_.context}else{'No update recorded'})}})
+  $root = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+  $all = if ($root -is [Array]) { @($root) } elseif ($root.PSObject.Properties.Name -contains 'projects') { @($root.projects) } elseif ($root.PSObject.Properties.Name -contains 'cards') { @($root.cards) } else { throw 'Invalid projects data.' }
+  $map = @{}
+  foreach ($p in $all) { $map[[string]$p.id] = $p }
+  $chosen = if ($Ids.Count) {
+    $selected = New-Object System.Collections.Generic.List[object]
+    foreach ($id in $Ids) { if (-not $map.ContainsKey($id)) { throw "Project was not found: $id" }; [void]$selected.Add($map[$id]) }
+    $selected.ToArray()
+  } else { $all }
+  $result = New-Object System.Collections.Generic.List[object]
+  foreach ($p in $chosen) {
+    $nextAction = if (-not [string]::IsNullOrWhiteSpace([string]$p.nextAction)) { [string]$p.nextAction } elseif (-not [string]::IsNullOrWhiteSpace([string]$p.next)) { [string]$p.next } else { 'No next action recorded' }
+    $historyValue=Get-MeetingPackProperty $p 'projectHistory'
+    $historyRaw = @(if ($historyValue -is [Array]) { @($historyValue) } elseif ($historyValue) { @($historyValue) } else { })
+    [void]$result.Add([pscustomobject]@{
+      id = [string]$p.id
+      name = [string]$p.title
+      nextAction = $nextAction
+      status = Get-MeetingPackStatus ([string]$p.status)
+      health = [string]$p.riskColour
+      owner = [string]$p.owner
+      lead = Get-MeetingPackLead $p
+      reviewDate = [string]$p.reviewDate
+      blocker = [string]$p.blockerReason
+      update = if (-not [string]::IsNullOrWhiteSpace([string]$p.context)) { [string]$p.context } else { 'No update recorded' }
+      notes = [string]$p.notes
+      history = @(Get-MeetingPackHistoryLines $p 5)
+      historyCount = $historyRaw.Count
+    })
+  }
+  return $result.ToArray()
 }
 
 function ConvertTo-MeetingPackMarkdown($m,$projects) {
   $l=@('---','title: SAMI Meeting Pack',"classification: $($m.classification)","generated_at_adelaide: '$($m.time)'","scope: '$(([string]$m.scope).Replace("'","''"))'","revision: $($m.revision)",'brand: SAMI','brand_mark: circular_sami_mark','prepared_from: SAMI Kanban',"project_count: $($projects.Count)",'---','',"# SAMI Meeting Pack - $($m.classification)",'')
   if($m.classification-eq'Preview'){$l+=@('> **PREVIEW - NOT AUTHORISED**','')}
-  foreach($p in $projects){$l+=@("## $(([string]$p.name).Replace('#','\#'))",'',"**Next Action:** $($p.nextAction)",'',"- **Status:** $($p.status)","- **Project Lead:** $($p.lead)",'','### Latest Update','',[string]$p.update,'')}
+  foreach($p in $projects){$l+=@("## $(([string]$p.name).Replace('#','\#'))",'',"**Next Action:** $($p.nextAction)",'',"- **Status:** $($p.status)","- **Health:** $($p.health)","- **Owner:** $($p.owner)","- **Project Lead:** $($p.lead)","- **Review Date:** $($p.reviewDate)","- **Blocker:** $($p.blocker)",'','### Latest Update','',[string]$p.update,'','### Project Update History');if($p.history.Count){$l+=@($p.history|ForEach-Object{'- '+$_})}else{$l+='- No automatic project updates have been recorded yet.'};$l+=@('','### Additional Notes',$(if($p.notes){[string]$p.notes}else{'No additional notes recorded.'}),'')}
   [Text.UTF8Encoding]::new($false).GetBytes(($l-join"`n")+"`n")
 }
 
@@ -57,7 +120,7 @@ function New-MeetingPackXlsx($m,$projects) {
 }
 
 function New-MeetingPackPdf($m,$projects) {
-  $blocks=foreach($p in $projects){'<section><h2>'+(ConvertTo-MeetingPackXml $p.name)+'</h2><div class="next"><b>Next Action</b><p>'+(ConvertTo-MeetingPackXml $p.nextAction)+'</p></div><b>Status:</b> '+(ConvertTo-MeetingPackXml $p.status)+'<br><b>Project Lead:</b> '+(ConvertTo-MeetingPackXml $p.lead)+'<h3>Latest Update</h3><p>'+(ConvertTo-MeetingPackXml $p.update)+'</p></section>'};$wm=if($m.classification-eq'Preview'){'<div class="wm">PREVIEW</div>'}else{''};$iconPath=Join-Path $PSScriptRoot 'assets\sami_project_portfolio.ico';$iconData=if(Test-Path -LiteralPath $iconPath){'data:image/x-icon;base64,'+[Convert]::ToBase64String([IO.File]::ReadAllBytes($iconPath))}else{''};$html='<!doctype html><meta charset="utf-8"><style>@page{size:A4;margin:16mm}body{font:11pt Arial;color:#173640}header{border-bottom:4px solid #007f82;padding:10px}.mark{width:52px;height:52px;vertical-align:middle;object-fit:contain}h1{display:inline;margin-left:15px;color:#006b70}section{break-inside:avoid;border-left:5px solid #007f82;padding:10px;margin:15px 0;background:#f3f9f8}.next{background:#d9efed;padding:8px;font-size:12pt}.wm{position:fixed;top:42%;left:12%;font-size:70pt;transform:rotate(-30deg);color:rgba(0,127,130,.13);z-index:-1}</style><header><img class="mark" src="'+$iconData+'" alt="SAMI"><h1>Meeting Pack</h1></header><p><b>'+$m.classification+'</b> · '+$m.time+' · '+(ConvertTo-MeetingPackXml $m.scope)+' · Revision '+$m.revision.Substring(0,12)+'<br>Prepared from: SAMI Kanban</p>'+$wm+($blocks-join'');$dir=Join-Path([IO.Path]::GetTempPath())('sami-mp-'+[guid]::NewGuid().ToString('n'));[IO.Directory]::CreateDirectory($dir)|Out-Null;$hp=Join-Path $dir pack.html;$pp=Join-Path $dir pack.pdf;[IO.File]::WriteAllText($hp,$html,[Text.UTF8Encoding]::new($false));$edge=@("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe","$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe")|Where-Object{Test-Path $_}|Select-Object -First 1;if(-not$edge){throw 'Installed Edge PDF engine is unavailable.'};$p=Start-Process $edge -ArgumentList @('--headless','--disable-gpu',"--print-to-pdf=$pp",('file:///'+$hp.Replace('\','/'))) -Wait -PassThru -WindowStyle Hidden;if($p.ExitCode-ne0-or-not(Test-Path $pp)){throw 'PDF generation failed.'};try{[IO.File]::ReadAllBytes($pp)}finally{Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue}
+  $blocks=foreach($p in $projects){$history=if($p.history.Count){'<ul>'+($p.history|ForEach-Object{'<li>'+(ConvertTo-MeetingPackXml $_)+'</li>'}-join'')+'</ul>'}else{'<p>No automatic project updates have been recorded yet.</p>'};'<section><h2>'+(ConvertTo-MeetingPackXml $p.name)+'</h2><div class="next"><b>Next Action</b><p>'+(ConvertTo-MeetingPackXml $p.nextAction)+'</p></div><b>Status:</b> '+(ConvertTo-MeetingPackXml $p.status)+'<br><b>Health:</b> '+(ConvertTo-MeetingPackXml $p.health)+'<br><b>Owner:</b> '+(ConvertTo-MeetingPackXml $p.owner)+'<br><b>Project Lead:</b> '+(ConvertTo-MeetingPackXml $p.lead)+'<br><b>Review Date:</b> '+(ConvertTo-MeetingPackXml $p.reviewDate)+'<br><b>Blocker:</b> '+(ConvertTo-MeetingPackXml $p.blocker)+'<h3>Latest Update</h3><p>'+ (ConvertTo-MeetingPackXml $p.update) +'</p><h3>Project Update History</h3>'+$history+'<h3>Additional Notes</h3><p>'+ (ConvertTo-MeetingPackXml $(if($p.notes){$p.notes}else{'No additional notes recorded.'})) +'</p></section>'};$wm=if($m.classification-eq'Preview'){'<div class="wm">PREVIEW</div>'}else{''};$iconPath=Join-Path $PSScriptRoot 'assets\sami_project_portfolio.ico';$iconData=if(Test-Path -LiteralPath $iconPath){'data:image/x-icon;base64,'+[Convert]::ToBase64String([IO.File]::ReadAllBytes($iconPath))}else{''};$html='<!doctype html><meta charset="utf-8"><style>@page{size:A4;margin:16mm}body{font:11pt Arial;color:#173640}header{border-bottom:4px solid #007f82;padding:10px}.mark{width:52px;height:52px;vertical-align:middle;object-fit:contain}h1{display:inline;margin-left:15px;color:#006b70}section{break-inside:avoid;border-left:5px solid #007f82;padding:10px;margin:15px 0;background:#f3f9f8}.next{background:#d9efed;padding:8px;font-size:12pt}.wm{position:fixed;top:42%;left:12%;font-size:70pt;transform:rotate(-30deg);color:rgba(0,127,130,.13);z-index:-1}</style><header><img class="mark" src="'+$iconData+'" alt="SAMI"><h1>Meeting Pack</h1></header><p><b>'+$m.classification+'</b> · '+$m.time+' · '+(ConvertTo-MeetingPackXml $m.scope)+' · Revision '+$m.revision.Substring(0,12)+'<br>Prepared from: SAMI Kanban</p>'+$wm+($blocks-join'');$dir=Join-Path([IO.Path]::GetTempPath())('sami-mp-'+[guid]::NewGuid().ToString('n'));[IO.Directory]::CreateDirectory($dir)|Out-Null;$hp=Join-Path $dir pack.html;$pp=Join-Path $dir pack.pdf;[IO.File]::WriteAllText($hp,$html,[Text.UTF8Encoding]::new($false));$edge=@("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe","$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe")|Where-Object{Test-Path $_}|Select-Object -First 1;if(-not$edge){throw 'Installed Edge PDF engine is unavailable.'};$p=Start-Process $edge -ArgumentList @('--headless','--disable-gpu',"--print-to-pdf=$pp",('file:///'+$hp.Replace('\','/'))) -Wait -PassThru -WindowStyle Hidden;if($p.ExitCode-ne0-or-not(Test-Path $pp)){throw 'PDF generation failed.'};try{[IO.File]::ReadAllBytes($pp)}finally{Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue}
 }
 
 function Invoke-MeetingPackExport([string]$Body,[string]$CanonicalPath,[string]$SnapshotPath,[string]$CanonicalRoot,[bool]$TeamReachable) {
@@ -85,7 +148,7 @@ function New-MeetingPackXlsx($m,$projects) {
     $subtitle=$m.classification+' | Generated '+$m.time+' | Revision '+$m.revision.Substring(0,12)+' | Prepared from: SAMI Kanban'
     $rows.Add('<row r="2" ht="28" customHeight="1">'+(XCell 'A2' $subtitle 4)+'</row>')
     $rows.Add('<row r="3" ht="26" customHeight="1">'+(XCell 'A3' 'Project Name' 1)+(XCell 'B3' 'Next Action' 1)+(XCell 'C3' 'Status' 1)+(XCell 'D3' 'Project Lead' 1)+(XCell 'E3' 'Latest Update' 1)+'</row>')
-    $r=4;foreach($project in $projects){$rows.Add('<row r="'+$r+'" ht="48" customHeight="1">'+(XCell ('A'+$r) $project.name 2)+(XCell ('B'+$r) $project.nextAction 4)+(XCell ('C'+$r) $project.status)+(XCell ('D'+$r) $project.lead)+(XCell ('E'+$r) $project.update)+'</row>');$r++}
+    $r=4;foreach($project in $projects){$historyText=if($project.history.Count){'Recent Project Update History: '+($project.history -join ' ; ')}else{'No automatic project updates have been recorded yet.'};$notesText=if($project.notes){'Additional Notes: '+[string]$project.notes}else{'No additional notes recorded.'};$latest=([string]$project.update+' | '+$historyText+' | '+$notesText);$rows.Add('<row r="'+$r+'" ht="72" customHeight="1">'+(XCell ('A'+$r) $project.name 2)+(XCell ('B'+$r) $project.nextAction 4)+(XCell ('C'+$r) $project.status)+(XCell ('D'+$r) $project.lead)+(XCell ('E'+$r) $latest)+'</row>');$r++}
     $last=[Math]::Max(3,$r-1)
     $sheet='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetViews><sheetView workbookViewId="0"><pane xSplit="2" ySplit="3" topLeftCell="C4" activePane="bottomRight" state="frozen"/><selection pane="bottomRight" activeCell="C4" sqref="C4"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols><col min="1" max="1" width="32" customWidth="1"/><col min="2" max="2" width="52" customWidth="1"/><col min="3" max="3" width="18" customWidth="1"/><col min="4" max="4" width="24" customWidth="1"/><col min="5" max="5" width="58" customWidth="1"/></cols><sheetData>'+($rows-join'')+'</sheetData><mergeCells count="2"><mergeCell ref="B1:E1"/><mergeCell ref="A2:E2"/></mergeCells><drawing r:id="rId1"/><tableParts count="1"><tablePart r:id="rId2"/></tableParts></worksheet>'
     Add-MeetingPackZipText $z 'xl/worksheets/sheet1.xml' $sheet
