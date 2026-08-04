@@ -1,5 +1,9 @@
 # SAMI Kanban WorkServer Change Log
 
+## 2026-08-04
+
+- Removed Vue Motion DC relocation from Backlog and AXON Mitis from Done; renamed the blocked Mitis Health Pilot POCUS card to Mitis Health Pilot and renamed PACS HW Refresh - 3 Stage Program to PACS HW Refresh - 7 Stage Program.
+
 ## 2026-08-03 — 2026.08.03.175232
 
 - Fixed the sync indicator incorrectly reporting failure while Team ESMI synchronisation was healthy.

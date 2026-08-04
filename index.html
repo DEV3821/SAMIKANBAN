@@ -2560,6 +2560,7 @@ let appState = {
   reviewStats: null,
   editingUnlocked: false,
   editToken: "",
+  editExpires: "",
   presentationIds: [],
   presentationIndex: 0,
   presentationDensity: 1,
@@ -3424,9 +3425,9 @@ async function createFolderForCard(id) {
 async function openProjectFolder(id) {
   const index = cardById(id); if (index < 0) return;
   const card = appState.projects[index], folder = folderMetadata(card);
-  if (!folder) { if (appState.editingUnlocked) return createFolderForCard(id); showNotice("No folder linked. Unlock editing to create a project folder.", "error"); return; }
+  if (!folder) { if (currentEditSession().unlocked) return createFolderForCard(id); showNotice("No folder linked. Unlock editing to create a project folder.", "error"); return; }
   try {
-    const result = await postJson("api/project-folder/open", { projectId:id, relativePath:folder.relativePath });
+    const result = await postJson("api/project-folder/open", { projectId:id, relativePath:folder.relativePath }, { requiresEdit: false });
     if (!result.opened && result.source !== "team-esmi") showNotice("Files folder is local-only or Team ESMI could not be confirmed.", "ok");
     else if ((result.warnings || []).length) showNotice(result.warnings.join(" "), "error");
   }
@@ -4726,42 +4727,95 @@ function requestSyncCheck() {
   pollSyncStatus();
 }
 async function ensureFreshBeforeSave() {
-  const status = await fetchSyncStatus();
-  const nextProjectsRevision = sourceProjectsRevision(status);
+  const response = await fetch("api/projects-revision?ts=" + Date.now(), { cache: "no-store" });
+  let status = {};
+  try { status = await response.json(); } catch (_) {}
+  if (!response.ok || !status || status.ok === false || !status.projectsRevision) {
+    throw new Error(status && status.error ? status.error : "The Team ESMI project revision could not be checked.");
+  }
+  const nextProjectsRevision = String(status.projectsRevision);
   if (appState.sync.projectsRevision && nextProjectsRevision && nextProjectsRevision !== appState.sync.projectsRevision) {
     appState.sync.pending = { revision: nextProjectsRevision, message: "Updated from Team ESMI" };
     renderSyncIndicator();
     showNotice("Remote update available - close this editor and refresh before saving to avoid overwriting newer Team ESMI data.", "error");
     return false;
   }
-  rememberSyncStatus(status);
+  appState.sync.teamReachable = status.teamReachable === true;
+  appState.sync.projectsRevision = nextProjectsRevision;
   return true;
 }
+function readEditSessionStorage(key) {
+  try { return sessionStorage.getItem(key) || ""; } catch (_) { return ""; }
+}
+function writeEditSessionStorage(key, value) {
+  try { sessionStorage.setItem(key, value); } catch (_) {}
+}
+function removeEditSessionStorage(key) {
+  try { sessionStorage.removeItem(key); } catch (_) {}
+}
+function currentEditSession() {
+  const token = String(appState.editToken || "").trim();
+  const expires = String(appState.editExpires || "").trim();
+  const expiryValid = !expires || new Date(expires).getTime() > Date.now();
+  return { token: token, expires: expires, unlocked: !!(appState.editingUnlocked && token && expiryValid) };
+}
 function loadEditSession() {
-  const token = sessionStorage.getItem(EDIT_TOKEN_KEY) || "";
-  const expires = sessionStorage.getItem(EDIT_EXPIRES_KEY) || "";
+  const token = readEditSessionStorage(EDIT_TOKEN_KEY);
+  const expires = readEditSessionStorage(EDIT_EXPIRES_KEY);
   if (token && expires && new Date(expires) > new Date()) {
     appState.editingUnlocked = true;
     appState.editToken = token;
+    appState.editExpires = expires;
   } else {
     appState.editingUnlocked = false;
     appState.editToken = "";
-    sessionStorage.removeItem(EDIT_TOKEN_KEY);
-    sessionStorage.removeItem(EDIT_EXPIRES_KEY);
+    appState.editExpires = "";
+    removeEditSessionStorage(EDIT_TOKEN_KEY);
+    removeEditSessionStorage(EDIT_EXPIRES_KEY);
+  }
+  updateEditState();
+}
+async function validateEditSession() {
+  const session = currentEditSession();
+  if (!session.unlocked) {
+    clearEditSession();
+    return false;
+  }
+  try {
+    const response = await fetch("api/edit-status", {
+      cache: "no-store",
+      headers: { "X-Kanban-Edit-Token": session.token }
+    });
+    let payload = {};
+    try { payload = await response.json(); } catch (_) {}
+    if (!response.ok || payload.ok === false || payload.unlocked !== true) {
+      clearEditSession();
+      return false;
+    }
+    appState.editingUnlocked = true;
+    appState.editExpires = String(payload.expires || session.expires || "");
+    if (appState.editExpires) writeEditSessionStorage(EDIT_EXPIRES_KEY, appState.editExpires);
+    updateEditState();
+    return true;
+  } catch (_) {
+    clearEditSession();
+    return false;
   }
 }
 function setEditSession(token, expires) {
-  appState.editingUnlocked = true;
-  appState.editToken = token;
-  sessionStorage.setItem(EDIT_TOKEN_KEY, token);
-  sessionStorage.setItem(EDIT_EXPIRES_KEY, expires);
+  appState.editingUnlocked = !!token;
+  appState.editToken = String(token || "");
+  appState.editExpires = String(expires || "");
+  writeEditSessionStorage(EDIT_TOKEN_KEY, appState.editToken);
+  writeEditSessionStorage(EDIT_EXPIRES_KEY, appState.editExpires);
   updateEditState();
 }
 function clearEditSession() {
   appState.editingUnlocked = false;
   appState.editToken = "";
-  sessionStorage.removeItem(EDIT_TOKEN_KEY);
-  sessionStorage.removeItem(EDIT_EXPIRES_KEY);
+  appState.editExpires = "";
+  removeEditSessionStorage(EDIT_TOKEN_KEY);
+  removeEditSessionStorage(EDIT_EXPIRES_KEY);
   updateEditState();
 }
 function updateEditState() {
@@ -4770,14 +4824,18 @@ function updateEditState() {
   const lock = document.getElementById("lockBtn");
   const addProject = document.getElementById("addProjectBtn");
   if (!state) return;
-  state.textContent = appState.editingUnlocked ? "Editing unlocked" : "Editing locked";
-  state.className = "edit-state" + (appState.editingUnlocked ? " unlocked" : "");
-  unlock.style.display = appState.editingUnlocked ? "none" : "";
-  lock.style.display = appState.editingUnlocked ? "" : "none";
-  if (addProject) { addProject.hidden = !appState.editingUnlocked; addProject.disabled = !appState.editingUnlocked; }
+  const busy = !!appState.saving;
+  const unlocked = currentEditSession().unlocked;
+  state.textContent = unlocked ? "Editing unlocked" : "Editing locked";
+  state.className = "edit-state" + (unlocked ? " unlocked" : "");
+  unlock.style.display = unlocked ? "none" : "";
+  lock.style.display = unlocked ? "" : "none";
+  unlock.disabled = busy;
+  lock.disabled = busy;
+  if (addProject) { addProject.hidden = !unlocked; addProject.disabled = !unlocked || busy; }
   document.querySelectorAll("[data-edit-required]").forEach(btn => {
-    btn.disabled = !appState.editingUnlocked;
-    btn.title = appState.editingUnlocked ? "" : "Unlock editing to update cards.";
+    btn.disabled = !unlocked || busy;
+    btn.title = unlocked ? "" : "Unlock editing to update cards.";
   });
   renderOrderHandleState();
 }
@@ -5005,7 +5063,8 @@ function exitPresentation() {
   }
 }
 function requireUnlocked() {
-  if (appState.editingUnlocked) return true;
+  if (currentEditSession().unlocked) return true;
+  if (appState.editingUnlocked || appState.editToken) clearEditSession();
   showNotice("Editing is locked. Use Unlock Editing before saving changes.", "error");
   return false;
 }
@@ -5595,28 +5654,71 @@ function applyCanonicalProjectSave(result) {
   }
   (Array.isArray(result.auditEvents) ? result.auditEvents : []).forEach(rememberAuditUpdate);
 }
-async function postJson(url, body) {
+function lockedSaveError(message) {
+  const error = new Error(message || "Editing is locked. Unlock editing before saving changes.");
+  error.code = "LOCKED";
+  error.status = 401;
+  return error;
+}
+function saveFailureMessage(error, prefix) {
+  const err = error || {};
+  if (err.code === "LOCKED" || err.status === 401) return "Editing is locked. Save was not written to Team ESMI.";
+  if (err.status === 409) return "Save conflict: the shared board changed before this save. Refresh the board before retrying.";
+  if (err.status === 503) return "Team ESMI is unavailable. Save was not written to the shared portfolio.";
+  if (err.code === "TIMEOUT") return "Save timed out before Team ESMI confirmation. Refresh before retrying.";
+  return (prefix || "Save failed") + ": " + (err.message || "unknown server error");
+}
+async function postJson(url, body, options) {
+  const requiresEdit = !(options && options.requiresEdit === false);
+  const session = currentEditSession();
+  if (requiresEdit && !session.unlocked) {
+    clearEditSession();
+    throw lockedSaveError();
+  }
   const headers = { "Content-Type": "application/json; charset=utf-8" };
-  if (appState.editToken) headers["X-Kanban-Edit-Token"] = appState.editToken;
+  if (session.token) headers["X-Kanban-Edit-Token"] = session.token;
   if (appState.sync.projectsRevision) headers["X-Kanban-Projects-Revision"] = appState.sync.projectsRevision;
   headers["X-Kanban-Client-Session"] = getClientSessionId();
-  appState.saving = true;
-  renderAppVersion();
+  if (requiresEdit) {
+    appState.saving = true;
+    updateEditState();
+    renderAppVersion();
+  }
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const timeoutId = controller ? window.setTimeout(() => controller.abort(), 120000) : 0;
   try {
-    const r = await fetch(url, { method: "POST", headers: headers, body: JSON.stringify(body) });
+    let r;
+    try {
+      r = await fetch(url, { method: "POST", headers: headers, body: JSON.stringify(body), signal: controller ? controller.signal : undefined });
+    } catch (fetchError) {
+      if (controller && controller.signal.aborted) {
+        const timeoutError = new Error("Team ESMI did not confirm the save within 120 seconds.");
+        timeoutError.code = "TIMEOUT";
+        throw timeoutError;
+      }
+      throw fetchError;
+    }
     let payload = {};
     try { payload = await r.json(); } catch (_) {}
     if (!r.ok || payload.ok === false) {
       const error = new Error(payload.error || ("HTTP " + r.status));
       error.status = r.status;
       error.payload = payload;
+      if (r.status === 401 || /locked|PIN/i.test(error.message)) {
+        clearEditSession();
+        error.code = "LOCKED";
+      }
       throw error;
     }
     if (payload.syncStatus) rememberSyncStatus(payload.syncStatus);
     return payload;
   } finally {
-    appState.saving = false;
-    renderAppVersion();
+    if (timeoutId) window.clearTimeout(timeoutId);
+    if (requiresEdit) {
+      appState.saving = false;
+      updateEditState();
+      renderAppVersion();
+    }
   }
 }
 async function persistCard(action, note, mutate) {
@@ -5656,7 +5758,9 @@ async function persistCard(action, note, mutate) {
     const saveResult = await postJson("api/projects", savePayload);
     applyCanonicalProjectSave(saveResult);
     const canonicalCard = cardById(card.id) >= 0 ? appState.projects[cardById(card.id)] : card;
-    await loadBoardOrder(appState.projects, { showWarning: false });
+    if (previousStatus !== normalizeStatus(card.status)) {
+      await loadBoardOrder(appState.projects, { showWarning: false });
+    }
     render(appState.projects, appState.payload.meta || {});
     if (previousStatus !== normalizeStatus(card.status)) {
       const orderSaved = await persistLaneOrderAfterStatusChange(card.id, previousStatus, normalizeStatus(card.status));
@@ -5674,12 +5778,13 @@ async function persistCard(action, note, mutate) {
     appState.projects = appState.payload.projects || [];
     setSaveUi("failed");
     setTimeout(() => setSaveUi("idle"), 2400);
-    showNotice("Save failed. Audit/data not updated: " + err.message, "error");
+    showNotice(saveFailureMessage(err, "Save failed. Audit/data was not updated"), "error");
   }
 }
 async function persistLeadChange(id, value) {
   clearNotice();
   if (!requireUnlocked()) return;
+  if (appState.saving) return;
   const idx = cardById(id);
   if (idx < 0) return;
   if (!(await ensureFreshBeforeSave())) return;
@@ -5718,7 +5823,6 @@ async function persistLeadChange(id, value) {
     const saveResult = await postJson("api/projects", savePayload);
     applyCanonicalProjectSave(saveResult);
     const canonicalCard = appState.projects[cardById(id)] || card;
-    await loadBoardOrder(appState.projects, { showWarning: false });
     render(appState.projects, appState.payload.meta || {});
     setSaveUi("saved");
     setTimeout(() => setSaveUi("idle"), 1600);
@@ -5727,7 +5831,7 @@ async function persistLeadChange(id, value) {
   } catch (err) {
     appState.payload = originalPayload;
     appState.projects = appState.payload.projects || [];
-    showNotice("Save failed. Audit/data not updated: " + err.message, "error");
+    showNotice(saveFailureMessage(err, "Save failed. Audit/data was not updated"), "error");
     if (originalProjectLead === undefined) delete card.projectLead;
     else card.projectLead = originalProjectLead;
     card.lastUpdated = originalLastUpdated;
@@ -6300,6 +6404,7 @@ async function boot() {
     loadOverviewState();
     loadPresentationSelection();
     loadEditSession();
+    await validateEditSession();
     await checkAppVersion();
     startAppVersionMonitoring();
     appState.sync.syncInFlight = true;

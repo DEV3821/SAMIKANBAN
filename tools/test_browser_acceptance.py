@@ -475,16 +475,23 @@ class AcceptanceRun:
             timeout=20,
             message="Client B conflict edit did not persist",
         )
+        stale_revision = str((stale_status.get("source", {}).get("projects", {}) or {}).get("lastWriteUtc", ""))
+        stale_revision_payload = {
+            "ok": True,
+            "mode": "team-canonical",
+            "teamReachable": True,
+            "projectsRevision": stale_revision,
+        }
         page_a.route(
-            "**/api/sync-status*",
-            lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(stale_status)),
+            "**/api/projects-revision*",
+            lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(stale_revision_payload)),
         )
         page_a.locator("#saveBtn").click()
         page_a.wait_for_function(
-            "() => document.getElementById('notice').classList.contains('error') && document.getElementById('notice').textContent.includes('Save failed')",
+            "() => document.getElementById('notice').classList.contains('error') && (document.getElementById('notice').textContent.includes('Save failed') || document.getElementById('notice').textContent.includes('Save conflict'))",
             timeout=30000,
         )
-        page_a.unroute("**/api/sync-status*")
+        page_a.unroute("**/api/projects-revision*")
         notice = page_a.locator("#notice").text_content() or ""
         conflict_responses = [
             item
@@ -492,7 +499,7 @@ class AcceptanceRun:
             if int(item.get("status", 0)) == 409 and "/api/projects" in str(item.get("url", ""))
         ]
         self.check(
-            "Save failed" in notice
+            ("Save failed" in notice or "Save conflict" in notice)
             and any(marker in notice.lower() for marker in ("source changed", "refresh the board", "canonical")),
             "edit conflict did not show the truthful stale-save message",
             notice=notice,

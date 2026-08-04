@@ -1814,11 +1814,30 @@ function Save-ProjectDataTransaction {
     $incomingIds[$incomingId] = $true
   }
 
+  $deletedProjectIds = @()
+  $deletedIdSet = @{}
+  if (Test-ObjectProperty -Object $payload -Name 'deletedProjectIds') {
+    $rawDeletedProjectIds = Get-ObjectPropertyValue -Object $payload -Name 'deletedProjectIds'
+    if ($null -eq $rawDeletedProjectIds -or $rawDeletedProjectIds -is [string] -or $rawDeletedProjectIds -isnot [System.Collections.IEnumerable]) {
+      throw 'Payload deletedProjectIds must be an array.'
+    }
+    foreach ($rawDeletedId in @($rawDeletedProjectIds)) {
+      $deletedId = [string]$rawDeletedId
+      if ([string]::IsNullOrWhiteSpace($deletedId)) { throw 'Payload deletedProjectIds contains a blank ID.' }
+      if ($deletedIdSet.ContainsKey($deletedId)) { throw "Duplicate deleted project ID: $deletedId" }
+      if (-not $canonicalById.ContainsKey($deletedId)) { throw "Cannot delete unknown project ID: $deletedId" }
+      if ($incomingIds.ContainsKey($deletedId)) { throw "Deleted project ID is also present in projects: $deletedId" }
+      $deletedIdSet[$deletedId] = $true
+      $deletedProjectIds += $deletedId
+    }
+  }
+
   $occurredAt = [DateTimeOffset]::Now.ToString('o')
   $actor = Get-ReliableServerActor
   $changeId = [Guid]::NewGuid().ToString()
   $mergedCards = New-Object System.Collections.Generic.List[object]
   $changedCards = New-Object System.Collections.Generic.List[object]
+  $deletedCards = New-Object System.Collections.Generic.List[object]
   $historyChanges = New-Object System.Collections.Generic.List[object]
 
   foreach ($incomingCard in $incomingCards) {
@@ -1865,10 +1884,13 @@ function Save-ProjectDataTransaction {
 
   foreach ($canonicalCard in $canonicalCards) {
     $canonicalId = [string](Get-ObjectPropertyValue -Object $canonicalCard -Name 'id')
-    if (-not $incomingIds.ContainsKey($canonicalId)) { [void]$mergedCards.Add($canonicalCard) }
+    if (-not $incomingIds.ContainsKey($canonicalId) -and -not $deletedIdSet.ContainsKey($canonicalId)) { [void]$mergedCards.Add($canonicalCard) }
+  }
+  foreach ($deletedProjectId in $deletedProjectIds) {
+    [void]$deletedCards.Add($canonicalById[$deletedProjectId])
   }
 
-  if ($changedCards.Count -eq 0) {
+  if ($changedCards.Count -eq 0 -and $deletedCards.Count -eq 0) {
     $revision = Get-FileRevisionInfo -Path $authorityProjectsPath
     return [ordered]@{ ok = $true; committed = $false; idempotent = $true; changeId = ''; projectsRevision = [string]$revision.lastWriteUtc; projectsSignature = [string]$revision.hash; canonicalProjects = $canonicalPayload; projects = @($canonicalPayload.projects) }
   }
@@ -1904,6 +1926,15 @@ function Save-ProjectDataTransaction {
     }
   }
   foreach ($historyAuditEvent in $historyAuditEvents) { [void]$auditEvents.Add($historyAuditEvent) }
+  foreach ($deletedCard in $deletedCards) {
+    $deleteClientEvent = [pscustomobject]@{
+      type = 'card_deleted'
+      summary = 'Card deleted'
+      note = 'Card removed from the active portfolio.'
+      details = [ordered]@{ status = [string](Get-ObjectPropertyValue -Object $deletedCard -Name 'status') }
+    }
+    [void]$auditEvents.Add((Get-ServerAuditEvent -ClientEvent $deleteClientEvent -Card $deletedCard -Action 'project_deleted' -OccurredAt $occurredAt -ChangeId $changeId -ProjectsRevision $occurredAt))
+  }
 
   $projectsText = ($canonicalPayload | ConvertTo-Json -Depth 50) + [Environment]::NewLine
   $auditText = if (Test-Path -LiteralPath $authorityAuditPath -PathType Leaf) { [System.IO.File]::ReadAllText($authorityAuditPath, [System.Text.Encoding]::UTF8) } else { '' }
@@ -1927,6 +1958,7 @@ function Save-ProjectDataTransaction {
     projectsSignature = [string]$revisionAfter.hash
     canonicalProjects = $canonicalPayload
     projects = @($canonicalPayload.projects)
+    deletedProjectIds = @($deletedProjectIds)
     card = if ($updatedCard) { $updatedCard[0] } else { $null }
     historyEvents = @($historyChanges | ForEach-Object { $card = $_.card; @($card.projectHistory) | Select-Object -Last 1 })
     auditEvents = $auditEvents.ToArray()
@@ -2396,6 +2428,18 @@ function Unlock-Editing {
   $expires = (Get-Date).AddMinutes([int]$editConfig.sessionMinutes)
   $script:EditSessions[$token] = $expires
   return @{ ok = $true; token = $token; expires = $expires.ToString("o"); unlocked = $true }
+}
+
+function Get-EditSessionStatus {
+  param([string]$Request)
+
+  $token = Get-RequestHeader -Request $Request -Name "X-Kanban-Edit-Token"
+  if (-not (Test-EditToken -Token $token)) {
+    return @{ ok = $true; unlocked = $false; expires = "" }
+  }
+
+  $expires = [DateTime]$script:EditSessions[$token]
+  return @{ ok = $true; unlocked = $true; expires = $expires.ToString("o") }
 }
 
 function Assert-ProjectId {
@@ -2899,6 +2943,27 @@ try {
           teamReachable = [bool]$script:TeamReachable
         }
         Write-ServerLog "200 $method $rawPath"
+        continue
+      }
+      if ($pathOnly -eq "/api/edit-status") {
+        $editStatus = Get-EditSessionStatus -Request $request
+        Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload $editStatus
+        Write-ServerLog "200 $method $rawPath unlocked=$($editStatus.unlocked)"
+        continue
+      }
+      if ($pathOnly -eq "/api/projects-revision") {
+        [void](Update-TeamReachability)
+        $revisionPath = if ($script:TeamReachable) { $script:CanonicalProjectsPath } else { $script:RuntimeProjectsPath }
+        $revision = Get-FileSignatureInfo -Path $revisionPath
+        Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload @{
+          ok = $true
+          mode = $script:EffectiveMode
+          teamReachable = [bool]$script:TeamReachable
+          projectsRevision = [string]$revision.lastWriteUtc
+          projectsLength = [int64]$revision.length
+          checkedAt = (Get-Date).ToString('o')
+        }
+        Write-ServerLog "200 $method $rawPath projectsRevision=$($revision.lastWriteUtc)"
         continue
       }
       if ($pathOnly -eq "/api/project-folder/status") {
