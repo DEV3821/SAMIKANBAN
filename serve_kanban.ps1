@@ -1425,7 +1425,7 @@ function Copy-CanonicalFileToRuntime {
 }
 
 function Sync-CanonicalToRuntime {
-  $result = @{ projectsCopied=$false; auditCopied=$false; projectFileIndexCopied=$false; boardOrderCopied=$false; skipped='' }
+  $result = @{ projectsCopied=$false; auditCopied=$false; projectFileIndexCopied=$false; boardOrderCopied=$false; configCopied=$false; cardActivityIndexCopied=$false; skipped='' }
   if (-not (Update-TeamReachability)) { $result.skipped = 'team_unreachable'; return $result }
   $result.projectsCopied = Copy-CanonicalFileToRuntime -CanonicalPath $script:CanonicalProjectsPath -RuntimePath $script:RuntimeProjectsPath -Label 'projects.json'
   $result.auditCopied = Copy-CanonicalFileToRuntime -CanonicalPath $script:CanonicalAuditPath -RuntimePath $script:RuntimeAuditPath -Label 'card_updates.jsonl'
@@ -1434,6 +1434,12 @@ function Sync-CanonicalToRuntime {
   }
   if (Test-Path -LiteralPath $script:CanonicalBoardOrderPath -PathType Leaf) {
     $result.boardOrderCopied = Copy-CanonicalFileToRuntime -CanonicalPath $script:CanonicalBoardOrderPath -RuntimePath $script:RuntimeBoardOrderPath -Label 'board_order.json'
+  }
+  if (Test-Path -LiteralPath $script:CanonicalConfigPath -PathType Leaf) {
+    $result.configCopied = Copy-CanonicalFileToRuntime -CanonicalPath $script:CanonicalConfigPath -RuntimePath $script:RuntimeConfigPath -Label 'kanban_config.json'
+  }
+  if (Test-Path -LiteralPath $script:CanonicalCardActivityIndexPath -PathType Leaf) {
+    $result.cardActivityIndexCopied = Copy-CanonicalFileToRuntime -CanonicalPath $script:CanonicalCardActivityIndexPath -RuntimePath $script:RuntimeCardActivityIndexPath -Label 'card_activity_index.json'
   }
   return $result
 }
@@ -2731,12 +2737,14 @@ try {
   $script:CanonicalProjectFileIndexPath = Join-Path $CanonicalRoot 'data\project_file_index.json'
   $script:CanonicalBoardOrderPath = Join-Path $CanonicalRoot 'data\board_order.json'
   $script:CanonicalConfigPath = Join-Path $CanonicalRoot 'data\kanban_config.json'
+  $script:CanonicalCardActivityIndexPath = Join-Path $CanonicalRoot 'data\card_activity_index.json'
   $script:CanonicalProjectFilesRoot = Join-Path $CanonicalRoot 'project_files'
   $script:RuntimeProjectsPath = Join-Path $Root 'data\projects.json'
   $script:RuntimeAuditPath = Join-Path $Root 'data\card_updates.jsonl'
   $script:RuntimeProjectFileIndexPath = Join-Path $Root 'data\project_file_index.json'
   $script:RuntimeBoardOrderPath = Join-Path $Root 'data\board_order.json'
   $script:RuntimeConfigPath = Join-Path $Root 'data\kanban_config.json'
+  $script:RuntimeCardActivityIndexPath = Join-Path $Root 'data\card_activity_index.json'
   $script:LocalProjectFilesRoot = Join-Path $LocalMirrorRoot 'project_files'
   [void](Update-TeamReachability)
   Write-ServerLog "Canonical Team ESMI root: $CanonicalRoot"
