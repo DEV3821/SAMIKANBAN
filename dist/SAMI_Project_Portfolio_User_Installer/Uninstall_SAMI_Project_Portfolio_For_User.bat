@@ -1,6 +1,6 @@
 @echo off
 setlocal
-title Uninstall SAMI Project Portfolio
+title Uninstall SAMI Kanban
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Uninstall_SAMI_Project_Portfolio_For_User.ps1"
 set "RESULT=%ERRORLEVEL%"
 if not "%RESULT%"=="0" pause

@@ -1,6 +1,6 @@
 @echo off
 setlocal
-title Install SAMI Project Portfolio
+title Install SAMI Kanban
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install_SAMI_Project_Portfolio_For_User.ps1" %*
 set "RESULT=%ERRORLEVEL%"
 if not "%RESULT%"=="0" (

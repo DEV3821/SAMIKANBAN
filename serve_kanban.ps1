@@ -2831,6 +2831,10 @@ try {
     $client = $listener.AcceptTcpClient()
     try {
       $stream = $client.GetStream()
+      # Browsers may open speculative TCP connections before sending a request.
+      # Bound the read so one idle preconnect cannot block the single-threaded listener.
+      $stream.ReadTimeout = 2000
+      $stream.WriteTimeout = 5000
       $buffer = New-Object byte[] 8192
       $read = $stream.Read($buffer, 0, $buffer.Length)
       if ($read -le 0) {

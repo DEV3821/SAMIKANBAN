@@ -11,15 +11,29 @@ This repository contains the SAMI Kanban application shell. Live board data, aud
 
 When `SAMI_KANBAN_TEAM_ROOT` is not set, the server uses the local source directory. Never commit live `data/projects.json`, `data/card_updates.jsonl`, `project_files`, logs, or credentials.
 
-## Existing-user updates (zero install)
+## Production user launch
 
-Existing users, including Robyn, keep using their current **SAMI Project Portfolio** Desktop or Start Menu shortcut. Do not rerun the per-user installer for normal UI releases.
+Normal users use one **SAMI Kanban** shortcut. It opens the hosted production release directly at:
 
-On each launch, the existing bootstrap process:
+`http://SAH0235190:8788/`
 
-1. Reads the current application files from the canonical Team ESMI WorkServer.
-2. Refreshes the user's runtime mirror under `%LOCALAPPDATA%\SAMI-Kanban-WorkServer\site`.
-3. Starts the local server in the background.
-4. Opens the portfolio in a Microsoft Edge app-style window.
+The hosted service runs on `SAH0235190` (`10.23.77.57`) and reads the production authority under `C:\SAMI_KANBAN`. Team ESMI is used for backup, archive, and project-document integration; it is not in the normal click-to-open path.
 
-Normal UI updates require no administrator rights, PWA installation, dependency installation, or manual file copying. The installer under `dist\SAMI_Project_Portfolio_User_Installer` is for first-time setup only. If Team ESMI is unavailable, the existing launcher warning and local fallback rules still apply.
+The normal shortcut must not start `bootstrap_kanban.ps1`, copy a runtime mirror, run Robocopy, start a local server, probe a health endpoint, or scan Team ESMI. The old **SAMI Project Portfolio** launcher is retained only as a recoverable compatibility file and must not be restored as the normal shortcut.
+
+For a new or migrated user, install the direct shortcut with:
+
+```powershell
+.\tools\install_sami_kanban_hosted_shortcut.ps1
+```
+
+The installer creates a direct `.url` shortcut, preserves the SAMI icon, backs up any old `.lnk` launcher, and does not copy or run the application runtime. Use `-NoLaunch` when staging the shortcut for another user. The root `install_sami_project_portfolio.ps1` remains as a compatibility entry point and now delegates to the hosted shortcut installer.
+
+Verify the hosted release without changing production:
+
+```powershell
+Invoke-RestMethod http://SAH0235190:8788/api/health
+Invoke-RestMethod http://SAH0235190:8788/api/app-version/status
+```
+
+If DNS is temporarily unavailable, the equivalent direct endpoint is `http://10.23.77.57:8788/`. Do not use the old `127.0.0.1:8011` launcher for normal access.

@@ -31,9 +31,9 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $backupRoot = Join-Path $TeamRoot "backups\app-deploy-$stamp"
 $files = @(
   'index.html','manifest.webmanifest','serve_kanban.ps1','meeting_pack.ps1','run_kanban.bat','run_kanban_debug.bat','run_kanban_silent.vbs',
-  'install_sami_project_portfolio.ps1','tools\bootstrap_kanban.ps1','tools\setup_meeting_pack_pin.ps1','tools\launch_sami_portfolio.vbs',
+  'install_sami_project_portfolio.ps1','tools\bootstrap_kanban.ps1','tools\setup_meeting_pack_pin.ps1','tools\launch_sami_portfolio.vbs','tools\install_sami_kanban_hosted_shortcut.ps1',
   'tools\deploy_to_team_esmi.ps1','Repair_SAMI_Project_Portfolio_Icon.ps1','Repair_SAMI_Project_Portfolio_Icon.bat',
-  'data\app_version.json','README.md','assets\README.md'
+  'data\app_version.json','README.md','assets\README.md','docs\SAMI_Kanban_Client_Launcher_Runbook.md'
 )
 $protected = '^(?i)(data\\(?:projects(?:\.example)?\.json|card_updates\.jsonl|kanban_config\.json|project_file_index\.json|card_activity_index\.json)|project_files(?:\\|$)|backups(?:\\|$)|logs(?:\\|$))'
 
