@@ -2,6 +2,14 @@ Option Explicit
 Dim shell, fso, toolRoot, appRoot, sourceBootstrap, localBase, cacheRoot, localTools, bootstrap, command, i
 Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
+
+' A normal launch now opens the production target.  Arguments retain the
+' legacy bootstrap path for explicit rollback/test invocations.
+If WScript.Arguments.Count = 0 Then
+  shell.Run "http://SAH0235190:8788/", 1, False
+  WScript.Quit 0
+End If
+
 toolRoot = fso.GetParentFolderName(WScript.ScriptFullName)
 appRoot = fso.GetParentFolderName(toolRoot)
 sourceBootstrap = fso.BuildPath(toolRoot, "bootstrap_kanban.ps1")

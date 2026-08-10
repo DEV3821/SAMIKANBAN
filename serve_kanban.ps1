@@ -8,6 +8,7 @@
   [ValidateSet('team-canonical','local-fallback','offline','error')]
   [string]$RuntimeMode = "",
   [int]$Port = 8011,
+  [string]$BindAddress = "127.0.0.1",
   [string]$LogPath = "logs\kanban_server.log"
 )
 
@@ -2682,6 +2683,7 @@ try {
   Write-ServerLog "LocalMirrorRoot parameter: $LocalMirrorRoot"
   Write-ServerLog "RuntimeMode parameter: $RuntimeMode"
   Write-ServerLog "Port: $Port"
+  Write-ServerLog "Bind address: $BindAddress"
   Write-ServerLog "Requested log path: $LogPath"
   Write-ServerLog "Resolved log path: $script:LogPath"
   Write-ServerLog "Current user: $env:USERNAME"
@@ -2770,10 +2772,11 @@ try {
   Write-ServerLog "canonical project_files readable=$(Test-CanonicalContainerSafe -Path $script:CanonicalProjectFilesRoot) writable=$(Test-DirectoryWritableFromAcl $script:CanonicalProjectFilesRoot): $($script:CanonicalProjectFilesRoot)"
   Repair-UserShortcutIcons -AppRoot $Root
 
-  $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Parse("127.0.0.1"), $Port)
-  Write-ServerLog "Attempting to bind TcpListener to 127.0.0.1:$Port"
+  $bindIp = [System.Net.IPAddress]::Parse($BindAddress)
+  $listener = [System.Net.Sockets.TcpListener]::new($bindIp, $Port)
+  Write-ServerLog "Attempting to bind TcpListener to ${BindAddress}:$Port"
   $listener.Start()
-  Write-ServerLog "Listening on http://127.0.0.1:$Port"
+  Write-ServerLog "Listening on http://${BindAddress}:$Port"
 
   while ($true) {
     $client = $listener.AcceptTcpClient()
@@ -2930,6 +2933,7 @@ try {
           ok = $true
           app = "SAMI Project Portfolio"
           port = $Port
+          bindAddress = $BindAddress
           pid = $PID
           root = $Root
           startedAt = $script:StartedAt
