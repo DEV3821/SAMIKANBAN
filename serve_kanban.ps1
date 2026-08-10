@@ -9,7 +9,11 @@
   [string]$RuntimeMode = "",
   [int]$Port = 8011,
   [string]$BindAddress = "127.0.0.1",
-  [string]$LogPath = "logs\kanban_server.log"
+  [string]$LogPath = "logs\kanban_server.log",
+  [ValidateRange(0,86400)]
+  [int]$ProjectFileScanIntervalSeconds = 7,
+  [ValidateRange(0,86400)]
+  [int]$ProjectFileScanInitialDelaySeconds = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,9 +44,11 @@ $script:BackedUpPaths = @{}
 $script:EditSessions = @{}
 $script:ProjectFileScanState = @{
   lastScan = $null
+  nextScanAt = $null
   folderSignatures = @{}
   candidates = @{}
 }
+$script:ProjectFileIndexStatusCache = $null
 $script:StartedAt = (Get-Date).ToString("o")
 $script:ServerScriptHash = try { (Get-FileHash -Algorithm SHA256 -LiteralPath $PSCommandPath).Hash.ToLowerInvariant() } catch { "unknown" }
 
@@ -2068,7 +2074,10 @@ function Get-FileFriendlyType {
     '.jpg' { return 'JPEG image' }
     '.jpeg' { return 'JPEG image' }
     '.zip' { return 'ZIP archive' }
-    default { return if ([string]::IsNullOrWhiteSpace($Extension)) { 'File' } else { ($Extension.TrimStart('.').ToUpperInvariant() + ' file') } }
+    default {
+      if ([string]::IsNullOrWhiteSpace($Extension)) { return 'File' }
+      return ($Extension.TrimStart('.').ToUpperInvariant() + ' file')
+    }
   }
 }
 
@@ -2135,6 +2144,18 @@ function Test-ProjectFileStableAccess {
 
 function Get-ProjectFileIndexStatus {
   $path = $script:CanonicalProjectFileIndexPath
+  $exists = Test-Path -LiteralPath $path -PathType Leaf
+  if (-not $exists) {
+    $result = [ordered]@{ exists = $false; path = $path; lastWriteUtc = ''; timestamp = ''; signature = ''; hash = ''; length = 0; baselineReady = $false; indexRevision = 0 }
+    $script:ProjectFileIndexStatusCache = [pscustomobject]@{ signature = ''; value = $result }
+    return $result
+  }
+  $item = Get-Item -LiteralPath $path
+  $lastWriteUtc = $item.LastWriteTimeUtc.ToString('o')
+  $signature = $lastWriteUtc + '|' + [string]$item.Length
+  if ($script:ProjectFileIndexStatusCache -and [string]$script:ProjectFileIndexStatusCache.signature -eq $signature) {
+    return $script:ProjectFileIndexStatusCache.value
+  }
   $revision = Get-FileRevisionInfo -Path $path
   $baselineReady = $false
   $indexRevision = 0
@@ -2146,8 +2167,9 @@ function Get-ProjectFileIndexStatus {
       if ($null -ne $rawRevision) { [void][int]::TryParse([string]$rawRevision, [ref]$indexRevision) }
     } catch { }
   }
-  $lastWriteUtc = [string]$revision.lastWriteUtc
-  return [ordered]@{ exists = [bool]$revision.exists; path = $path; lastWriteUtc = $lastWriteUtc; timestamp = $lastWriteUtc; signature = if ($revision.exists) { $lastWriteUtc + '|' + [string]$revision.length } else { '' }; hash = [string]$revision.hash; length = [int64]$revision.length; baselineReady = [bool]$baselineReady; indexRevision = [int]$indexRevision }
+  $result = [ordered]@{ exists = [bool]$revision.exists; path = $path; lastWriteUtc = $lastWriteUtc; timestamp = $lastWriteUtc; signature = $signature; hash = [string]$revision.hash; length = [int64]$revision.length; baselineReady = [bool]$baselineReady; indexRevision = [int]$indexRevision }
+  $script:ProjectFileIndexStatusCache = [pscustomobject]@{ signature = $signature; value = $result }
+  return $result
 }
 
 function Invoke-ProjectFileScan {
@@ -2155,9 +2177,13 @@ function Invoke-ProjectFileScan {
 
   $empty = [ordered]@{ changed = $false; addedCount = 0; deferredCount = 0; baselineRequired = $false; unmappedFolders = 0; skipped = '' }
   if (-not $script:TeamReachable) { $empty.skipped = 'team_unreachable'; return $empty }
-  if ($script:ProjectFileScanState.lastScan -and -not $Force -and ((Get-Date) - $script:ProjectFileScanState.lastScan).TotalSeconds -lt 7) { $empty.skipped = 'rate_limited'; return $empty }
-  $script:ProjectFileScanState.lastScan = Get-Date
+  $now = Get-Date
+  if ($script:ProjectFileScanState.nextScanAt -and -not $Force -and $now -lt $script:ProjectFileScanState.nextScanAt) { $empty.skipped = 'deferred'; return $empty }
+  if ($script:ProjectFileScanState.lastScan -and -not $Force -and $ProjectFileScanIntervalSeconds -gt 0 -and (($now - $script:ProjectFileScanState.lastScan).TotalSeconds -lt $ProjectFileScanIntervalSeconds)) { $empty.skipped = 'rate_limited'; return $empty }
+  $script:ProjectFileScanState.lastScan = $now
+  if ($ProjectFileScanIntervalSeconds -gt 0) { $script:ProjectFileScanState.nextScanAt = $now.AddSeconds($ProjectFileScanIntervalSeconds) }
   $lockStream = $null
+  $scanStartedAt = $now
   try {
     $lockPath = $script:CanonicalProjectFileIndexPath + '.scan.lock'
     $lockStream = [System.IO.File]::Open($lockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
@@ -2204,7 +2230,8 @@ function Invoke-ProjectFileScan {
       $folderPath = Join-Path $script:CanonicalRoot $folderRelative.Replace('/', '\')
       $files = Get-ProjectFolderInventory -FolderPath $folderPath -FolderRelativePath $folderRelative -CardId $cardId
       $signature = Get-ProjectFolderSignature -Files $files
-      $priorSignature = if ($script:ProjectFileScanState.folderSignatures.ContainsKey($cardId)) { [string]$script:ProjectFileScanState.folderSignatures[$cardId] } else { '' }
+      $priorSignature = ''
+      if ($script:ProjectFileScanState.folderSignatures.ContainsKey($cardId)) { $priorSignature = [string]$script:ProjectFileScanState.folderSignatures[$cardId] }
       $script:ProjectFileScanState.folderSignatures[$cardId] = $signature
       $pendingCandidates = @($script:ProjectFileScanState.candidates.Values | Where-Object { [string]$_.cardId -eq $cardId })
       $pendingCandidate = $pendingCandidates.Count -gt 0
@@ -2224,7 +2251,9 @@ function Invoke-ProjectFileScan {
       $added = New-Object System.Collections.Generic.List[object]
       foreach ($file in $files) {
         $pathKey = [string]$file.relativePath.ToLowerInvariant(); $fp = [string]$file.fingerprint
-        $record = if ($knownByPath.ContainsKey($pathKey)) { $knownByPath[$pathKey] } elseif ($knownByFingerprint.ContainsKey($fp)) { $knownByFingerprint[$fp] } else { $null }
+        $record = $null
+        if ($knownByPath.ContainsKey($pathKey)) { $record = $knownByPath[$pathKey] }
+        elseif ($knownByFingerprint.ContainsKey($fp)) { $record = $knownByFingerprint[$fp] }
         $rename = $false
         if ($null -eq $record) {
           foreach ($old in $removed) {
@@ -2232,7 +2261,8 @@ function Invoke-ProjectFileScan {
           }
         }
         if ($null -eq $record) {
-          $candidate = if ($script:ProjectFileScanState.candidates.ContainsKey($fp)) { $script:ProjectFileScanState.candidates[$fp] } else { $null }
+          $candidate = $null
+          if ($script:ProjectFileScanState.candidates.ContainsKey($fp)) { $candidate = $script:ProjectFileScanState.candidates[$fp] }
           if ($null -eq $candidate -or [string]$candidate.relativePath -ne [string]$file.relativePath -or [int64]$candidate.size -ne [int64]$file.size -or [string]$candidate.lastWriteTime -ne [string]$file.lastWriteTime) {
             $script:ProjectFileScanState.candidates[$fp] = [pscustomobject]@{ cardId = $cardId; relativePath = $file.relativePath; size = $file.size; lastWriteTime = $file.lastWriteTime; firstSeen = (Get-Date).ToString('o') }
             $empty.deferredCount++
@@ -2285,12 +2315,20 @@ function Invoke-ProjectFileScan {
     $indexRevision = 0; $rawIndexRevision = Get-ObjectPropertyValue -Object $indexPayload -Name 'indexRevision'; if ($null -ne $rawIndexRevision) { [void][int]::TryParse([string]$rawIndexRevision, [ref]$indexRevision) }
     Set-ObjectPropertyValue -Object $indexPayload -Name 'indexRevision' -Value ($indexRevision + 1)
     Set-ObjectPropertyValue -Object $indexPayload -Name 'generatedAt' -Value $occurredAt
-    $projectsText = if ($groups.Count -gt 0) { (($projectsPayload | ConvertTo-Json -Depth 50) + [Environment]::NewLine) } else { $null }
-    $auditText = if ($groups.Count -gt 0) { if (Test-Path -LiteralPath $script:CanonicalAuditPath -PathType Leaf) { [IO.File]::ReadAllText($script:CanonicalAuditPath, [Text.Encoding]::UTF8) } else { '' } } else { $null }
+    $projectsText = $null
+    if ($groups.Count -gt 0) { $projectsText = (($projectsPayload | ConvertTo-Json -Depth 50) + [Environment]::NewLine) }
+    $auditText = $null
+    if ($groups.Count -gt 0) {
+      if (Test-Path -LiteralPath $script:CanonicalAuditPath -PathType Leaf) { $auditText = [IO.File]::ReadAllText($script:CanonicalAuditPath, [Text.Encoding]::UTF8) } else { $auditText = '' }
+    }
     foreach ($auditEvent in $auditEvents) { if ($auditText.Length -gt 0 -and -not $auditText.EndsWith("`n") -and -not $auditText.EndsWith("`r")) { $auditText += [Environment]::NewLine }; $auditText += (ConvertTo-Json (Redact-AuditObject $auditEvent) -Depth 40 -Compress) + [Environment]::NewLine }
     $indexText = ($indexPayload | ConvertTo-Json -Depth 50) + [Environment]::NewLine
-    $projectPaths = if ($groups.Count -gt 0) { @($script:CanonicalProjectsPath, $script:RuntimeProjectsPath) } else { @() }
-    $auditPaths = if ($groups.Count -gt 0) { @($script:CanonicalAuditPath, $script:RuntimeAuditPath) } else { @() }
+    $projectPaths = @()
+    $auditPaths = @()
+    if ($groups.Count -gt 0) {
+      $projectPaths = @($script:CanonicalProjectsPath, $script:RuntimeProjectsPath)
+      $auditPaths = @($script:CanonicalAuditPath, $script:RuntimeAuditPath)
+    }
     Commit-ProjectDataFiles -ProjectsText $projectsText -ProjectsPaths $projectPaths -AuditText $auditText -AuditPaths $auditPaths -IndexText $indexText -IndexPaths @($script:CanonicalProjectFileIndexPath, $script:RuntimeProjectFileIndexPath)
     $empty.changed = $true; $empty.changeId = $changeId; $empty.indexRevision = $indexRevision + 1; $empty.historyEventCount = $historyEvents.Count; return $empty
   } catch {
@@ -2300,6 +2338,8 @@ function Invoke-ProjectFileScan {
     return $empty
   } finally {
     if ($lockStream) { $lockStream.Dispose() }
+    $scanElapsedMs = [math]::Round(((Get-Date) - $scanStartedAt).TotalMilliseconds, 1)
+    if ($scanElapsedMs -ge 500) { Write-ServerLog "project file scan elapsedMs=$scanElapsedMs intervalSeconds=$ProjectFileScanIntervalSeconds" }
   }
 }
 
@@ -2746,6 +2786,7 @@ try {
   $script:RuntimeConfigPath = Join-Path $Root 'data\kanban_config.json'
   $script:RuntimeCardActivityIndexPath = Join-Path $Root 'data\card_activity_index.json'
   $script:LocalProjectFilesRoot = Join-Path $LocalMirrorRoot 'project_files'
+  if ($ProjectFileScanInitialDelaySeconds -gt 0) { $script:ProjectFileScanState.nextScanAt = (Get-Date).AddSeconds($ProjectFileScanInitialDelaySeconds) }
   [void](Update-TeamReachability)
   Write-ServerLog "Canonical Team ESMI root: $CanonicalRoot"
   Write-ServerLog "Runtime root: $Root"
