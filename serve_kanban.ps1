@@ -3010,7 +3010,9 @@ try {
       }
       if ($pathOnly -eq "/api/projects-revision") {
         [void](Update-TeamReachability)
-        $revisionPath = if ($script:TeamReachable) { $script:CanonicalProjectsPath } else { $script:RuntimeProjectsPath }
+        $revisionQuery = Get-QueryValues -RawPath $rawPath
+        $meetingPackPreview = ([string]$revisionQuery["meetingPack"] -eq "1") -and (([string]$revisionQuery["mode"]).ToLowerInvariant() -eq "preview")
+        $revisionPath = if ($meetingPackPreview) { $script:RuntimeProjectsPath } elseif ($script:TeamReachable) { $script:CanonicalProjectsPath } else { $script:RuntimeProjectsPath }
         $revision = Get-FileSignatureInfo -Path $revisionPath
         Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload @{
           ok = $true
@@ -3018,6 +3020,7 @@ try {
           teamReachable = [bool]$script:TeamReachable
           projectsRevision = [string]$revision.lastWriteUtc
           projectsLength = [int64]$revision.length
+          hash = [string]$revision.hash
           checkedAt = (Get-Date).ToString('o')
         }
         Write-ServerLog "200 $method $rawPath projectsRevision=$($revision.lastWriteUtc)"

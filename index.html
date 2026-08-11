@@ -5927,12 +5927,20 @@ async function reviewQuick(action) {
   if (action === "done") await persistCard("mark_done", "Marked done in review mode", c => { c.status = "done"; c.completedDate = c.completedDate || todayDate(); c.completedOutcome = c.completedOutcome || "Completed during review"; });
   advanceReview();
 }
-async function meetingPackRevision() {
+async function meetingPackRevision(mode) {
   const response = await fetch("data/projects.json?meetingPack=" + Date.now(), { cache:"no-store" });
   if (!response.ok) throw new Error("Could not load the current board revision.");
   const bytes = new Uint8Array(await response.arrayBuffer());
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2,"0")).join("");
+  const subtle = globalThis.crypto && globalThis.crypto.subtle;
+  if (subtle && typeof subtle.digest === "function") {
+    const digest = await subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2,"0")).join("");
+  }
+  const revisionResponse = await fetch("api/projects-revision?meetingPack=1&mode=" + encodeURIComponent(mode || "preview") + "&ts=" + Date.now(), { cache:"no-store" });
+  if (!revisionResponse.ok) throw new Error("The browser cannot calculate the board revision. Please reopen Kanban through its launcher.");
+  const revision = await revisionResponse.json();
+  if (!revision.hash) throw new Error("The server did not provide a board revision.");
+  return String(revision.hash).toLowerCase();
 }
 function meetingPackOrderedProjects() { return appState.projects.slice(); }
 function openMeetingPack() { document.getElementById("meetingPackStatus").textContent=""; document.getElementById("meetingPackModal").classList.add("open"); }
@@ -5942,7 +5950,7 @@ async function generateMeetingPack(mode) {
   if (!chosen.length) { status.textContent="There are no cards to export."; return; }
 
   status.textContent="Generating Meeting Pack...";
-  try { const revision=await meetingPackRevision();const response=await fetch("api/meeting-pack/export",{method:"POST",headers:{"Content-Type":"application/json; charset=utf-8"},body:JSON.stringify({format,mode,scope,projectIds:chosen.map(p=>p.id),revision})});if(!response.ok){let message="HTTP "+response.status;try{const e=await response.json();message=e.error||message;}catch(_){}throw new Error(message)}const blob=await response.blob();const disposition=response.headers.get("Content-Disposition")||"";const match=/filename="?([^";]+)"?/i.exec(disposition);const name=match?match[1]:"SAMI_Meeting_Pack."+format;const link=document.createElement("a");link.href=URL.createObjectURL(blob);link.download=name;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(link.href),1000);status.textContent="Meeting Pack generated."; }
+  try { const revision=await meetingPackRevision(mode);const response=await fetch("api/meeting-pack/export",{method:"POST",headers:{"Content-Type":"application/json; charset=utf-8"},body:JSON.stringify({format,mode,scope,projectIds:chosen.map(p=>p.id),revision})});if(!response.ok){let message="HTTP "+response.status;try{const e=await response.json();message=e.error||message;}catch(_){}throw new Error(message)}const blob=await response.blob();const disposition=response.headers.get("Content-Disposition")||"";const match=/filename="?([^";]+)"?/i.exec(disposition);const name=match?match[1]:"SAMI_Meeting_Pack."+format;const link=document.createElement("a");link.href=URL.createObjectURL(blob);link.download=name;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(link.href),1000);status.textContent="Meeting Pack generated."; }
   catch(err){status.textContent="Generation failed: "+err.message;}
 
 }
