@@ -3013,14 +3013,15 @@ try {
         $revisionQuery = Get-QueryValues -RawPath $rawPath
         $meetingPackPreview = ([string]$revisionQuery["meetingPack"] -eq "1") -and (([string]$revisionQuery["mode"]).ToLowerInvariant() -eq "preview")
         $revisionPath = if ($meetingPackPreview) { $script:RuntimeProjectsPath } elseif ($script:TeamReachable) { $script:CanonicalProjectsPath } else { $script:RuntimeProjectsPath }
-        $revision = Get-FileSignatureInfo -Path $revisionPath
+        $revision = if ($meetingPackPreview) { Get-FileRevisionInfo -Path $revisionPath } else { Get-FileSignatureInfo -Path $revisionPath }
+        $revisionHash = if ($revision.ContainsKey('hash')) { [string]$revision['hash'] } else { '' }
         Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload @{
           ok = $true
           mode = $script:EffectiveMode
           teamReachable = [bool]$script:TeamReachable
           projectsRevision = [string]$revision.lastWriteUtc
           projectsLength = [int64]$revision.length
-          hash = [string]$revision.hash
+          hash = $revisionHash
           checkedAt = (Get-Date).ToString('o')
         }
         Write-ServerLog "200 $method $rawPath projectsRevision=$($revision.lastWriteUtc)"
