@@ -144,7 +144,7 @@ function New-MeetingPackPdf($m,$projects) {
   [IO.File]::WriteAllText($hp, $html, [Text.UTF8Encoding]::new($false))
   $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
   if (-not $edge) { throw 'Installed Edge PDF engine is unavailable.' }
-  $process = Start-Process $edge -ArgumentList @('--headless', '--disable-gpu', "--print-to-pdf=$pp", ('file:///' + $hp.Replace('\', '/'))) -Wait -PassThru -WindowStyle Hidden
+  $process = Start-Process $edge -ArgumentList @('--headless', '--disable-gpu', '--no-sandbox', "--print-to-pdf=$pp", ('file:///' + $hp.Replace('\', '/'))) -Wait -PassThru -WindowStyle Hidden
   if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $pp -PathType Leaf)) { throw 'PDF generation failed.' }
   try { [IO.File]::ReadAllBytes($pp) } finally { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
 }
