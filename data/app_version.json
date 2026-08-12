@@ -1,6 +1,6 @@
 {
-    "version":  "2026.08.03.175232",
-    "releasedAt":  "2026-08-03T17:52:32.3564043+09:30",
-    "message":  "Fixed healthy Team ESMI sync status reporting and PDF Meeting Pack generation",
-    "requiresReload":  true
+  "version":  "2026.08.13.120000",
+  "releasedAt":  "2026-08-13T12:00:00+09:30",
+  "message":  "Hosted project-files browser with canonical repository access",
+  "requiresReload":  true
 }

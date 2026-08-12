@@ -43,7 +43,7 @@ try {
     -BindAddress '0.0.0.0' `
     -ProjectFileScanIntervalSeconds 300 `
     -ProjectFileScanInitialDelaySeconds 300 `
-    -LogPath (Join-Path $logRoot 'kanban_server.log')
+    -LogPath (Join-Path $logRoot 'kanban_server.log') *>> $startLog
   $exitCode = $LASTEXITCODE
   Write-StartLog "Kanban server exited with code $exitCode"
   exit $exitCode

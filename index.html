@@ -967,6 +967,14 @@
   .drawer-file-counts b { color: var(--ink); }
   .drawer-file-actions { margin-top: 0.65rem; }
   .drawer-file-actions .folder-action { margin-left: 0; }
+  .drawer-file-browser { margin-top: 0.65rem; border-top: 1px solid var(--border); padding-top: 0.55rem; }
+  .drawer-file-browser .file-browser-path { color: var(--muted); font-size: 0.68rem; margin-bottom: 0.35rem; }
+  .drawer-file-browser ul { list-style: none; margin: 0; padding: 0; }
+  .drawer-file-browser li { display: flex; align-items: center; gap: 0.4rem; padding: 0.26rem 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); font-size: 0.72rem; }
+  .drawer-file-browser li a { color: var(--sa-blue-dark); text-decoration: none; flex: 1; overflow-wrap: anywhere; }
+  .drawer-file-browser li a:hover { text-decoration: underline; }
+  .drawer-file-browser .file-meta { color: var(--muted); font-size: 0.64rem; white-space: nowrap; }
+  .drawer-file-browser .file-error { color: var(--danger); }
   .drawer-file-date { margin-bottom: 0.5rem; color: var(--muted); font-size: 0.68rem; }
   .drawer-activity {
     margin-top: 0.75rem;
@@ -2437,6 +2445,7 @@
     <h3 id="drawerFileDetailsTitle">Files &amp; Documents</h3>
     <div class="drawer-file-counts" id="drawerFileCounts"></div>
     <div class="drawer-file-actions" id="drawerFileActions"></div>
+    <div class="drawer-file-browser" id="drawerFileBrowser" hidden></div>
   </section>
   <section class="drawer-sound-settings" aria-label="Update sound settings">
     <h3 id="soundSettingsTitle">Update sounds</h3>
@@ -3426,12 +3435,47 @@ async function openProjectFolder(id) {
   const index = cardById(id); if (index < 0) return;
   const card = appState.projects[index], folder = folderMetadata(card);
   if (!folder) { if (currentEditSession().unlocked) return createFolderForCard(id); showNotice("No folder linked. Unlock editing to create a project folder.", "error"); return; }
+  openDrawer(index);
+  await loadProjectFiles(id, "");
+}
+function formatProjectFileSize(value) {
+  const size = Number(value); if (!Number.isFinite(size)) return "";
+  if (size < 1024) return size + " B";
+  if (size < 1048576) return (size / 1024).toFixed(1) + " KB";
+  if (size < 1073741824) return (size / 1048576).toFixed(1) + " MB";
+  return (size / 1073741824).toFixed(1) + " GB";
+}
+function renderProjectFileBrowser(payload) {
+  const browser = document.getElementById("drawerFileBrowser"); if (!browser) return;
+  browser.hidden = false;
+  const current = String(payload.path || "");
+  const parent = current.includes("/") ? current.slice(0, current.lastIndexOf("/")) : "";
+  let html = '<div class="file-browser-path">Project files' + (current ? " / " + esc(current) : "") + '</div><ul>';
+  if (current) html += '<li><span aria-hidden="true">↩</span><a href="#" data-file-folder="' + attr(payload.projectId) + '" data-file-path="' + attr(parent) + '">Parent folder</a></li>';
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  if (!items.length) html += '<li><span class="file-meta">This project has no files in this folder.</span></li>';
+  items.forEach(item => {
+    const isFolder = item.kind === "folder", icon = isFolder ? "📁" : "📄";
+    const href = String(item.url || "#"), label = esc(item.name || "Unnamed");
+    const meta = isFolder ? "Folder" : [item.mimeType || "File", formatProjectFileSize(item.size)].filter(Boolean).join(" · ");
+    html += '<li><span aria-hidden="true">' + icon + '</span>' + (isFolder ? '<a href="#" data-file-folder="' + attr(payload.projectId) + '" data-file-path="' + attr(item.path) + '">' + label + '</a>' : '<a href="' + attr(href) + '" target="_blank" rel="noopener">' + label + '</a><a class="file-meta" href="' + attr(href + (href.includes("?") ? "&" : "?") + "download=1") + '">Download</a>') + '<span class="file-meta">' + esc(meta) + '</span></li>';
+  });
+  browser.innerHTML = html + '</ul>';
+  browser.querySelectorAll("[data-file-folder]").forEach(link => link.addEventListener("click", event => { event.preventDefault(); loadProjectFiles(link.getAttribute("data-file-folder"), link.getAttribute("data-file-path") || ""); }));
+}
+async function loadProjectFiles(projectId, relativePath) {
+  const browser = document.getElementById("drawerFileBrowser"); if (!browser) return;
+  browser.hidden = false; browser.innerHTML = '<div class="file-browser-path">Loading project files…</div>';
   try {
-    const result = await postJson("api/project-folder/open", { projectId:id, relativePath:folder.relativePath }, { requiresEdit: false });
-    if (!result.opened && result.source !== "team-esmi") showNotice("Files folder is local-only or Team ESMI could not be confirmed.", "ok");
-    else if ((result.warnings || []).length) showNotice(result.warnings.join(" "), "error");
+    const url = "api/projects/" + encodeURIComponent(projectId) + "/files" + (relativePath ? "/" + relativePath.split("/").map(encodeURIComponent).join("/") : "");
+    const response = await fetch(url, { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "HTTP " + response.status);
+    renderProjectFileBrowser(payload);
+  } catch (err) {
+    browser.innerHTML = '<div class="file-error">Project files temporarily unavailable.</div>';
+    console.warn("Project files unavailable", err);
   }
-  catch (err) { showNotice("Could not open project folder: " + err.message, "error"); }
 }
 function updateFolderIndicator(id) {
   const status = appState.folderStatuses[id], dot = document.querySelector('[data-folder-dot="' + CSS.escape(id) + '"]'), button = document.querySelector('[data-folder="' + CSS.escape(id) + '"]');
@@ -5552,8 +5596,9 @@ function renderDrawerFileDetails(card) {
   const section = document.getElementById("drawerFileDetails");
   const counts = document.getElementById("drawerFileCounts");
   const actions = document.getElementById("drawerFileActions");
+  const browser = document.getElementById("drawerFileBrowser");
   const entry = projectFileEntry(card);
-  if (!section || !counts || !actions || !entry || document.body.classList.contains("presentation-active")) {
+  if (!section || !counts || !actions || document.body.classList.contains("presentation-active")) {
     if (section) section.hidden = true;
     return;
   }
@@ -5564,9 +5609,10 @@ function renderDrawerFileDetails(card) {
   ];
   if (fileIndexCount(entry, "needsReviewCount") > 0) fields.push(["Needs review", "needsReviewCount"]);
   counts.innerHTML = fields.map(item => '<div><span>' + item[0] + '</span><b>' + fileIndexCount(entry, item[1]) + '</b></div>').join("");
-  const sortedAt = toDate(entry.lastFileSort);
+  const sortedAt = entry && toDate(entry.lastFileSort);
   actions.innerHTML = (sortedAt ? '<div class="drawer-file-date">Last file sort: ' + esc(sortedAt.toLocaleString("en-AU", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" })) + '</div>' : '') +
     (folderMetadata(card) ? '<button class="folder-action" type="button" data-folder="' + attr(card.id) + '">Open project folder</button>' : "");
+  if (browser) { browser.hidden = true; browser.innerHTML = ""; }
   section.hidden = false;
 }
 function renderDrawerActivity(card) {
@@ -5612,6 +5658,7 @@ function openDrawer(index) {
   renderDrawerActivity(t);
   document.getElementById("drawerBackdrop").classList.add("open");
   document.getElementById("drawer").classList.add("open");
+  if (folderMetadata(t)) loadProjectFiles(t.id, "");
 }
 function closeDrawer() {
   document.getElementById("drawerBackdrop").classList.remove("open");

@@ -134,6 +134,21 @@ function Get-MimeType {
     ".jpg"  { "image/jpeg"; break }
     ".jpeg" { "image/jpeg"; break }
     ".png"  { "image/png"; break }
+    ".gif"  { "image/gif"; break }
+    ".webp" { "image/webp"; break }
+    ".bmp"  { "image/bmp"; break }
+    ".pdf"  { "application/pdf"; break }
+    ".txt"  { "text/plain; charset=utf-8"; break }
+    ".md"   { "text/markdown; charset=utf-8"; break }
+    ".csv"  { "text/csv; charset=utf-8"; break }
+    ".xml"  { "application/xml; charset=utf-8"; break }
+    ".doc"  { "application/msword"; break }
+    ".docx" { "application/vnd.openxmlformats-officedocument.wordprocessingml.document"; break }
+    ".xls"  { "application/vnd.ms-excel"; break }
+    ".xlsx" { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"; break }
+    ".ppt"  { "application/vnd.ms-powerpoint"; break }
+    ".pptx" { "application/vnd.openxmlformats-officedocument.presentationml.presentation"; break }
+    ".zip"  { "application/zip"; break }
     ".svg"  { "image/svg+xml"; break }
     ".ico"  { "image/x-icon"; break }
     default { "application/octet-stream" }
@@ -1403,6 +1418,12 @@ function Get-CanonicalFileStatus {
 
 function Update-TeamReachability {
   if ($script:LastTeamCheck -and ((Get-Date) - $script:LastTeamCheck).TotalSeconds -lt 15) { return $script:TeamReachable }
+  if ($script:ConfiguredMode -eq 'local-fallback') {
+    $script:TeamReachable = $false
+    $script:EffectiveMode = 'local-fallback'
+    $script:LastTeamCheck = Get-Date
+    return $false
+  }
   $script:TeamReachable = (Test-ReachableDirectory -Path $script:CanonicalRoot) -and
     (Test-Path -LiteralPath $script:CanonicalProjectsPath -PathType Leaf) -and
     (Test-Path -LiteralPath $script:CanonicalAuditPath -PathType Leaf) -and
@@ -2664,6 +2685,67 @@ function Open-ProjectFolder {
   return @{ ok = $true; opened = $true; openedPath = $target; source = 'team-esmi'; statusColor = 'green'; teamReachable=$true; relativePath = $relativePath; canonicalPath = $location.canonicalPath; localPath = $location.localPath; warnings = $location.warnings }
 }
 
+function Get-ProjectFileContext {
+  param([string]$ProjectId, [string]$RelativePath = "")
+  $safeId = Assert-ProjectId -ProjectId $ProjectId
+  $card = Get-ProjectCardById -ProjectId $safeId
+  $folder = if ($card.folder -and -not [string]::IsNullOrWhiteSpace([string]$card.folder.relativePath)) {
+    Resolve-ProjectRelativePath -ProjectId '' -RelativePath ([string]$card.folder.relativePath)
+  } else { "project_files/$safeId" }
+  $repositoryRoot = [System.IO.Path]::GetFullPath($script:CanonicalProjectFilesRoot).TrimEnd('\')
+  $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $script:CanonicalRoot ($folder.Replace('/', '\'))))
+  $rootPrefix = $repositoryRoot + [System.IO.Path]::DirectorySeparatorChar
+  if (-not $projectRoot.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { throw "Project repository resolution failed." }
+  $relative = ([string]$RelativePath).Replace('/', '\')
+  if ($relative -match '(^|\\)\.\.?(\\|$)' -or [System.IO.Path]::IsPathRooted($relative) -or $relative.StartsWith('\') -or $relative.Contains([char]0)) {
+    throw "Invalid project file path."
+  }
+  $candidate = if ([string]::IsNullOrWhiteSpace($relative)) { $projectRoot } else { [System.IO.Path]::GetFullPath((Join-Path $projectRoot $relative)) }
+  $projectPrefix = $projectRoot.TrimEnd('\') + [System.IO.Path]::DirectorySeparatorChar
+  if (-not $candidate.Equals($projectRoot, [System.StringComparison]::OrdinalIgnoreCase) -and -not $candidate.StartsWith($projectPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { throw "Project file path is outside the project repository." }
+  $probe = $projectRoot
+  while ($true) {
+    if (Test-Path -LiteralPath $probe) {
+      $item = Get-Item -LiteralPath $probe -Force -ErrorAction Stop
+      if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Project file path crosses a link or junction." }
+    }
+    if ($probe.Equals($candidate, [System.StringComparison]::OrdinalIgnoreCase)) { break }
+    $parent = Split-Path -Parent $probe
+    if ([string]::IsNullOrWhiteSpace($parent) -or $parent.Equals($probe, [System.StringComparison]::OrdinalIgnoreCase)) { break }
+    $probe = $parent
+  }
+  return @{ card = $card; projectId = $safeId; projectRoot = $projectRoot; path = $candidate; relativePath = ([string]$RelativePath).Replace('\', '/') }
+}
+
+function Get-ProjectFileListing {
+  param([hashtable]$Context)
+  if (-not (Test-Path -LiteralPath $Context.projectRoot -PathType Container)) {
+    return @{ ok = $true; projectId = $Context.projectId; title = [string]$Context.card.title; path = ''; items = @(); empty = $true }
+  }
+  if (-not (Test-Path -LiteralPath $Context.path -PathType Container)) { throw "Project folder path was not found." }
+  $items = @()
+  foreach ($item in @(Get-ChildItem -LiteralPath $Context.path -Force -ErrorAction Stop | Sort-Object @{Expression={if($_.PSIsContainer){0}else{1}}}, Name)) {
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+    $childRelative = if ([string]::IsNullOrWhiteSpace($Context.relativePath)) { $item.Name } else { $Context.relativePath.TrimEnd('/') + '/' + $item.Name }
+    $items += @{ name = $item.Name; kind = $(if ($item.PSIsContainer) { 'folder' } else { 'file' }); path = $childRelative; size = $(if ($item.PSIsContainer) { $null } else { [int64]$item.Length }); modifiedAt = $item.LastWriteTimeUtc.ToString('o'); mimeType = $(if ($item.PSIsContainer) { 'inode/directory' } else { Get-MimeType -Path $item.FullName }); url = "/api/projects/$($Context.projectId)/files/$( [Uri]::EscapeDataString($childRelative).Replace('%2F','/') )" }
+  }
+  return @{ ok = $true; projectId = $Context.projectId; title = [string]$Context.card.title; path = $Context.relativePath; items = $items; empty = ($items.Count -eq 0) }
+}
+
+function Send-ProjectFileResponse {
+  param([System.Net.Sockets.NetworkStream]$Stream, [hashtable]$Context, [bool]$Download, [switch]$HeadOnly)
+  if (-not (Test-Path -LiteralPath $Context.path -PathType Leaf)) { throw "Project file was not found." }
+  $item = Get-Item -LiteralPath $Context.path -Force -ErrorAction Stop
+  if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Project file path crosses a link or junction." }
+  if ($item.Length -gt 268435456) { throw "Project file is too large to serve." }
+  $body = if ($HeadOnly) { [byte[]]@() } else { [IO.File]::ReadAllBytes($item.FullName) }
+  $safeName = ($item.Name -replace '[^A-Za-z0-9_. -]', '_')
+  $disposition = if ($Download) { 'attachment' } else { 'inline' }
+  $headers = @("HTTP/1.1 200 OK", "Content-Length: $($item.Length)", "Content-Type: $(Get-MimeType -Path $item.FullName)", ('Content-Disposition: ' + $disposition + '; filename="' + $safeName + '"'), "Cache-Control: no-store", "X-Content-Type-Options: nosniff", "Connection: close", "", "") -join "`r`n"
+  $headerBytes = [Text.Encoding]::ASCII.GetBytes($headers); $Stream.Write($headerBytes, 0, $headerBytes.Length)
+  if (-not $HeadOnly -and $body.Length -gt 0) { $Stream.Write($body, 0, $body.Length) }
+}
+
 function Send-Response {
   param(
     [System.Net.Sockets.NetworkStream]$Stream,
@@ -3045,6 +3127,25 @@ try {
         $syncStatus = Get-SyncStatus -SyncResult $syncResult
         Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload $syncStatus
         Write-ServerLog "200 $method $rawPath"
+        continue
+      }
+      if ($pathOnly -match '^/api/projects/([^/]+)/files(?:/(.*))?$') {
+        try {
+          $projectId = [Uri]::UnescapeDataString([string]$matches[1])
+          $relativePath = if ($null -eq $matches[2]) { '' } else { [Uri]::UnescapeDataString([string]$matches[2]) }
+          $context = Get-ProjectFileContext -ProjectId $projectId -RelativePath $relativePath
+          if (Test-Path -LiteralPath $context.path -PathType Container) {
+            Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload (Get-ProjectFileListing -Context $context)
+          } else {
+            $query = Get-QueryValues -RawPath $rawPath
+            Send-ProjectFileResponse -Stream $stream -Context $context -Download ([string]$query['download'] -eq '1') -HeadOnly:$headOnly
+          }
+          Write-ServerLog "200 $method $rawPath projectId=$projectId"
+        } catch {
+          Write-ExceptionLog -Exception $_.Exception -Prefix "PROJECT FILE ERROR"
+          $status = if ($_.Exception.Message -match 'not found|was not found') { 404 } else { 400 }
+          Send-Json -Stream $stream -StatusCode $status -StatusText $(if ($status -eq 404) { 'Not Found' } else { 'Bad Request' }) -Payload @{ ok = $false; error = 'Project files temporarily unavailable' }
+        }
         continue
       }
       if ($pathOnly -eq "/api/sync-state") {
