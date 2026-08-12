@@ -1,6 +1,6 @@
 {
-  "version":  "2026.08.13.120000",
-  "releasedAt":  "2026-08-13T12:00:00+09:30",
-  "message":  "Hosted project-files browser with canonical repository access",
+  "version":  "2026.08.13.130000",
+  "releasedAt":  "2026-08-13T13:00:00+09:30",
+  "message":  "Hosted project-files upload and browser",
   "requiresReload":  true
 }

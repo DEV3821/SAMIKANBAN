@@ -259,12 +259,13 @@ function Read-RequestBody {
     [System.Net.Sockets.NetworkStream]$Stream,
     [string]$Request,
     [byte[]]$InitialBuffer,
-    [int]$InitialRead
+    [int]$InitialRead,
+    [switch]$AsBytes
   )
 
   $headerEnd = $Request.IndexOf("`r`n`r`n")
   if ($headerEnd -lt 0) {
-    return ""
+    return $(if ($AsBytes) { [byte[]]@() } else { "" })
   }
 
   $headers = $Request.Substring(0, $headerEnd)
@@ -277,8 +278,9 @@ function Read-RequestBody {
   }
 
   if ($contentLength -le 0) {
-    return ""
+    return $(if ($AsBytes) { [byte[]]@() } else { "" })
   }
+  if ($contentLength -gt 360000000) { throw "Request body is too large." }
 
   $headerBytesLength = [System.Text.Encoding]::ASCII.GetByteCount($Request.Substring(0, $headerEnd + 4))
   $bodyBytes = New-Object byte[] $contentLength
@@ -296,6 +298,7 @@ function Read-RequestBody {
     $offset += $count
   }
 
+  if ($AsBytes) { return $bodyBytes }
   return [System.Text.Encoding]::UTF8.GetString($bodyBytes, 0, $offset)
 }
 
@@ -2732,6 +2735,28 @@ function Get-ProjectFileListing {
   return @{ ok = $true; projectId = $Context.projectId; title = [string]$Context.card.title; path = $Context.relativePath; items = $items; empty = ($items.Count -eq 0) }
 }
 
+function Upload-ProjectFile {
+  param([string]$ProjectId, [string]$RelativePath, [string]$Body)
+  $context = Get-ProjectFileContext -ProjectId $ProjectId -RelativePath $RelativePath
+  $payload = $Body | ConvertFrom-Json
+  $name = [string]$payload.name
+  if ([string]::IsNullOrWhiteSpace($name) -or $name.Length -gt 255 -or $name -match '[\\/]' -or $name -match '[\x00-\x1F<>:"|?*]') { throw "Invalid file name." }
+  if ($name -in @('.', '..')) { throw "Invalid file name." }
+  $targetDirectory = if (Test-Path -LiteralPath $context.path -PathType Container) { $context.path } else { throw "Upload folder was not found." }
+  $target = [IO.Path]::GetFullPath((Join-Path $targetDirectory $name))
+  $prefix = $targetDirectory.TrimEnd('\') + '\'
+  if (-not $target.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw "Upload path is outside the project repository." }
+  if (Test-Path -LiteralPath $target) { throw "A file with that name already exists." }
+  $encoded = [string]$payload.contentBase64
+  if ([string]::IsNullOrWhiteSpace($encoded)) { throw "File content is required." }
+  $bytes = [Convert]::FromBase64String($encoded)
+  if ($bytes.Length -gt 268435456) { throw "Files are limited to 256 MB." }
+  $stream = [IO.File]::Open($target, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+  try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+  Write-ServerLog "Project file uploaded projectId=$ProjectId relativePath=$RelativePath name=$name bytes=$($bytes.Length)"
+  return @{ ok = $true; name = $name; path = $(if ($RelativePath) { "$RelativePath/$name" } else { $name }); size = [int64]$bytes.Length }
+}
+
 function Send-ProjectFileResponse {
   param([System.Net.Sockets.NetworkStream]$Stream, [hashtable]$Context, [bool]$Download, [switch]$HeadOnly)
   if (-not (Test-Path -LiteralPath $Context.path -PathType Leaf)) { throw "Project file was not found." }
@@ -2932,7 +2957,8 @@ try {
 
       if ($method -eq "POST") {
         $pathOnly = ($rawPath -split "\?")[0]
-        $requestBody = Read-RequestBody -Stream $stream -Request $request -InitialBuffer $buffer -InitialRead $read
+        $requestBodyBytes = Read-RequestBody -Stream $stream -Request $request -InitialBuffer $buffer -InitialRead $read -AsBytes
+        $requestBody = [Text.Encoding]::UTF8.GetString($requestBodyBytes)
         try {
           if ($pathOnly -eq "/api/card-move") {
             [void](Update-TeamReachability)
@@ -3018,6 +3044,17 @@ try {
             $folderPayload = Ensure-ProjectFolder -Body $requestBody
             Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload $folderPayload
             Write-ServerLog "200 POST $rawPath -> $($folderPayload.relativePath)"
+            continue
+          }
+          if ($pathOnly -match '^/api/projects/([^/]+)/files/upload$') {
+            $uploadProjectId = [Uri]::UnescapeDataString([string]$matches[1])
+            [void](Update-TeamReachability)
+            $authorityConfigPath = if ($script:TeamReachable -and (Test-Path -LiteralPath $teamConfigPath -PathType Leaf)) { $teamConfigPath } else { $configPath }
+            Require-EditToken -Request $request -ConfigPath $authorityConfigPath
+            $query = Get-QueryValues -RawPath $rawPath
+            $upload = Upload-ProjectFile -ProjectId $uploadProjectId -RelativePath $(if ($query.ContainsKey('path')) { [string]$query['path'] } else { '' }) -Body $requestBody
+            Send-Json -Stream $stream -StatusCode 200 -StatusText "OK" -Payload $upload
+            Write-ServerLog "200 POST $rawPath project file uploaded"
             continue
           }
           if ($pathOnly -eq "/api/project-folder/open") {
