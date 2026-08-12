@@ -3435,8 +3435,12 @@ async function openProjectFolder(id) {
   const index = cardById(id); if (index < 0) return;
   const card = appState.projects[index], folder = folderMetadata(card);
   if (!folder) { if (currentEditSession().unlocked) return createFolderForCard(id); showNotice("No folder linked. Unlock editing to create a project folder.", "error"); return; }
-  openDrawer(index);
+  const drawer = document.getElementById("drawer");
+  if (!drawer || !drawer.classList.contains("open") || appState.editingIndex !== index) openDrawer(index);
+  const browser = document.getElementById("drawerFileBrowser");
+  if (browser) { browser.hidden = false; browser.innerHTML = '<div class="file-browser-path">Loading project files…</div>'; browser.scrollIntoView({ behavior:"smooth", block:"nearest" }); }
   await loadProjectFiles(id, "");
+  if (browser) { browser.hidden = false; browser.scrollIntoView({ behavior:"smooth", block:"nearest" }); }
 }
 function formatProjectFileSize(value) {
   const size = Number(value); if (!Number.isFinite(size)) return "";
@@ -5611,7 +5615,7 @@ function renderDrawerFileDetails(card) {
   counts.innerHTML = fields.map(item => '<div><span>' + item[0] + '</span><b>' + fileIndexCount(entry, item[1]) + '</b></div>').join("");
   const sortedAt = entry && toDate(entry.lastFileSort);
   actions.innerHTML = (sortedAt ? '<div class="drawer-file-date">Last file sort: ' + esc(sortedAt.toLocaleString("en-AU", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" })) + '</div>' : '') +
-    (folderMetadata(card) ? '<button class="folder-action" type="button" data-folder="' + attr(card.id) + '">Open project folder</button>' : "");
+    (folderMetadata(card) ? '<button class="folder-action" type="button" data-folder="' + attr(card.id) + '">Browse project files</button>' : "");
   if (browser) { browser.hidden = true; browser.innerHTML = ""; }
   section.hidden = false;
 }
