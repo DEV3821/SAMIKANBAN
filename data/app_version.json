@@ -1,6 +1,6 @@
 {
-  "version":  "2026.08.13.140000",
-  "releasedAt":  "2026-08-13T14:00:00+09:30",
-  "message":  "Multi-file project uploads with folder selection",
+  "version":  "2026.08.13.150000",
+  "releasedAt":  "2026-08-13T15:00:00+09:30",
+  "message":  "Visible upload completion feedback",
   "requiresReload":  true
 }

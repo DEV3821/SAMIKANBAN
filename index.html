@@ -978,6 +978,9 @@
   .drawer-file-upload { display:flex; align-items:center; gap:0.4rem; margin:0.35rem 0 0.55rem; }
   .drawer-file-upload input[type=file] { max-width: 15rem; font-size: 0.68rem; }
   .drawer-file-upload select { max-width: 14rem; font-size: 0.68rem; }
+  .drawer-file-upload-status { flex-basis: 100%; font-size: 0.68rem; color: var(--muted); }
+  .drawer-file-upload-status.success { color: var(--ready); font-weight: 600; }
+  .drawer-file-upload-status.error { color: var(--blocked); font-weight: 600; }
   .drawer-file-date { margin-bottom: 0.5rem; color: var(--muted); font-size: 0.68rem; }
   .drawer-activity {
     margin-top: 0.75rem;
@@ -3459,7 +3462,7 @@ function renderProjectFileBrowser(payload) {
   const parent = current.includes("/") ? current.slice(0, current.lastIndexOf("/")) : "";
   const folders = Array.isArray(payload.folders) ? payload.folders : [current];
   const folderOptions = folders.map(folder => '<option value="' + attr(folder) + '"' + (folder === current ? ' selected' : '') + '>' + esc(folder || 'Project root') + '</option>').join('');
-  let html = '<div class="file-browser-path">Project files' + (current ? " / " + esc(current) : "") + '</div><div class="drawer-file-upload"><input type="file" id="projectFileUploadInput" multiple><select id="projectFileUploadFolder" aria-label="Upload destination folder">' + folderOptions + '</select><button type="button" class="folder-action" data-upload-project="' + attr(payload.projectId) + '">Upload selected files</button></div><ul>';
+  let html = '<div class="file-browser-path">Project files' + (current ? " / " + esc(current) : "") + '</div><div class="drawer-file-upload"><input type="file" id="projectFileUploadInput" multiple><select id="projectFileUploadFolder" aria-label="Upload destination folder">' + folderOptions + '</select><button type="button" class="folder-action" data-upload-project="' + attr(payload.projectId) + '">Upload selected files</button><div class="drawer-file-upload-status" id="projectFileUploadStatus" aria-live="polite"></div></div><ul>';
   if (current) html += '<li><span aria-hidden="true">↩</span><a href="#" data-file-folder="' + attr(payload.projectId) + '" data-file-path="' + attr(parent) + '">Parent folder</a></li>';
   const items = Array.isArray(payload.items) ? payload.items : [];
   if (!items.length) html += '<li><span class="file-meta">This project has no files in this folder.</span></li>';
@@ -3486,7 +3489,9 @@ async function uploadProjectFile(projectId) {
   const session = currentEditSession();
   if (!session.unlocked || !session.token) { showNotice("Unlock editing before uploading project files.", "error"); return; }
   if (files.some(file => file.size > 268435456)) { showNotice("Each file is limited to 256 MB.", "error"); return; }
-  const button = document.querySelector("[data-upload-project]"); if (button) button.disabled = true;
+  const button = document.querySelector("[data-upload-project]"), status = document.getElementById("projectFileUploadStatus");
+  if (button) button.disabled = true;
+  if (status) { status.className = "drawer-file-upload-status"; status.textContent = "Uploading " + files.length + " file(s)…"; }
   try {
     const url = "api/projects/" + encodeURIComponent(projectId) + "/files/upload?path=" + encodeURIComponent(relativePath);
     const failed = [];
@@ -3497,9 +3502,17 @@ async function uploadProjectFile(projectId) {
       if (!response.ok || payload.ok === false) failed.push(file.name + ": " + (payload.error || "Upload failed"));
     }
     if (failed.length) throw new Error(failed.join("; "));
-    showNotice("Uploaded " + files.length + " file(s) to " + (relativePath || "Project root") + ".", "ok");
+    const successMessage = "Upload complete: " + files.length + " file(s) saved to " + (relativePath || "Project root") + ".";
+    showNotice(successMessage, "ok");
     await loadProjectFiles(projectId, relativePath);
-  } catch (err) { showNotice("Upload failed: " + (err.message || "Project file upload unavailable"), "error"); }
+    const refreshedStatus = document.getElementById("projectFileUploadStatus");
+    if (refreshedStatus) { refreshedStatus.className = "drawer-file-upload-status success"; refreshedStatus.textContent = successMessage; }
+    if (input) input.value = "";
+  } catch (err) {
+    const message = "Upload failed: " + (err.message || "Project file upload unavailable");
+    showNotice(message, "error");
+    if (status) { status.className = "drawer-file-upload-status error"; status.textContent = message; }
+  }
   finally { if (button) button.disabled = false; }
 }
 async function loadProjectFiles(projectId, relativePath) {
