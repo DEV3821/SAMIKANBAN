@@ -2727,12 +2727,17 @@ function Get-ProjectFileListing {
   }
   if (-not (Test-Path -LiteralPath $Context.path -PathType Container)) { throw "Project folder path was not found." }
   $items = @()
+  $folders = @('')
+  foreach ($folderItem in @(Get-ChildItem -LiteralPath $Context.projectRoot -Directory -Recurse -Force -ErrorAction Stop | Sort-Object FullName)) {
+    if (($folderItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+    $folders += $folderItem.FullName.Substring($Context.projectRoot.Length).TrimStart('\').Replace('\', '/')
+  }
   foreach ($item in @(Get-ChildItem -LiteralPath $Context.path -Force -ErrorAction Stop | Sort-Object @{Expression={if($_.PSIsContainer){0}else{1}}}, Name)) {
     if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
     $childRelative = if ([string]::IsNullOrWhiteSpace($Context.relativePath)) { $item.Name } else { $Context.relativePath.TrimEnd('/') + '/' + $item.Name }
     $items += @{ name = $item.Name; kind = $(if ($item.PSIsContainer) { 'folder' } else { 'file' }); path = $childRelative; size = $(if ($item.PSIsContainer) { $null } else { [int64]$item.Length }); modifiedAt = $item.LastWriteTimeUtc.ToString('o'); mimeType = $(if ($item.PSIsContainer) { 'inode/directory' } else { Get-MimeType -Path $item.FullName }); url = "/api/projects/$($Context.projectId)/files/$( [Uri]::EscapeDataString($childRelative).Replace('%2F','/') )" }
   }
-  return @{ ok = $true; projectId = $Context.projectId; title = [string]$Context.card.title; path = $Context.relativePath; items = $items; empty = ($items.Count -eq 0) }
+  return @{ ok = $true; projectId = $Context.projectId; title = [string]$Context.card.title; path = $Context.relativePath; items = $items; folders = $folders; empty = ($items.Count -eq 0) }
 }
 
 function Upload-ProjectFile {

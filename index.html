@@ -977,6 +977,7 @@
   .drawer-file-browser .file-error { color: var(--danger); }
   .drawer-file-upload { display:flex; align-items:center; gap:0.4rem; margin:0.35rem 0 0.55rem; }
   .drawer-file-upload input[type=file] { max-width: 15rem; font-size: 0.68rem; }
+  .drawer-file-upload select { max-width: 14rem; font-size: 0.68rem; }
   .drawer-file-date { margin-bottom: 0.5rem; color: var(--muted); font-size: 0.68rem; }
   .drawer-activity {
     margin-top: 0.75rem;
@@ -3456,7 +3457,9 @@ function renderProjectFileBrowser(payload) {
   browser.hidden = false;
   const current = String(payload.path || "");
   const parent = current.includes("/") ? current.slice(0, current.lastIndexOf("/")) : "";
-  let html = '<div class="file-browser-path">Project files' + (current ? " / " + esc(current) : "") + '</div><div class="drawer-file-upload"><input type="file" id="projectFileUploadInput"><button type="button" class="folder-action" data-upload-project="' + attr(payload.projectId) + '" data-upload-path="' + attr(current) + '">Upload file</button></div><ul>';
+  const folders = Array.isArray(payload.folders) ? payload.folders : [current];
+  const folderOptions = folders.map(folder => '<option value="' + attr(folder) + '"' + (folder === current ? ' selected' : '') + '>' + esc(folder || 'Project root') + '</option>').join('');
+  let html = '<div class="file-browser-path">Project files' + (current ? " / " + esc(current) : "") + '</div><div class="drawer-file-upload"><input type="file" id="projectFileUploadInput" multiple><select id="projectFileUploadFolder" aria-label="Upload destination folder">' + folderOptions + '</select><button type="button" class="folder-action" data-upload-project="' + attr(payload.projectId) + '">Upload selected files</button></div><ul>';
   if (current) html += '<li><span aria-hidden="true">↩</span><a href="#" data-file-folder="' + attr(payload.projectId) + '" data-file-path="' + attr(parent) + '">Parent folder</a></li>';
   const items = Array.isArray(payload.items) ? payload.items : [];
   if (!items.length) html += '<li><span class="file-meta">This project has no files in this folder.</span></li>';
@@ -3469,27 +3472,32 @@ function renderProjectFileBrowser(payload) {
   browser.innerHTML = html + '</ul>';
   browser.querySelectorAll("[data-file-folder]").forEach(link => link.addEventListener("click", event => { event.preventDefault(); loadProjectFiles(link.getAttribute("data-file-folder"), link.getAttribute("data-file-path") || ""); }));
   const uploadButton = browser.querySelector("[data-upload-project]");
-  if (uploadButton) uploadButton.addEventListener("click", () => uploadProjectFile(uploadButton.getAttribute("data-upload-project"), uploadButton.getAttribute("data-upload-path") || ""));
+  if (uploadButton) uploadButton.addEventListener("click", () => uploadProjectFile(uploadButton.getAttribute("data-upload-project")));
 }
 function bytesToBase64(buffer) {
   const bytes = new Uint8Array(buffer), chunk = 0x8000; let binary = "";
   for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunk, bytes.length)));
   return btoa(binary);
 }
-async function uploadProjectFile(projectId, relativePath) {
-  const input = document.getElementById("projectFileUploadInput"), file = input && input.files && input.files[0];
-  if (!file) { showNotice("Choose a file to upload.", "error"); return; }
+async function uploadProjectFile(projectId) {
+  const input = document.getElementById("projectFileUploadInput"), files = input && input.files ? Array.from(input.files) : [];
+  const folderSelect = document.getElementById("projectFileUploadFolder"), relativePath = folderSelect ? folderSelect.value : "";
+  if (!files.length) { showNotice("Choose one or more files to upload.", "error"); return; }
   const session = currentEditSession();
   if (!session.unlocked || !session.token) { showNotice("Unlock editing before uploading project files.", "error"); return; }
-  if (file.size > 268435456) { showNotice("Files are limited to 256 MB.", "error"); return; }
+  if (files.some(file => file.size > 268435456)) { showNotice("Each file is limited to 256 MB.", "error"); return; }
   const button = document.querySelector("[data-upload-project]"); if (button) button.disabled = true;
   try {
-    const body = { name:file.name, contentBase64:bytesToBase64(await file.arrayBuffer()) };
     const url = "api/projects/" + encodeURIComponent(projectId) + "/files/upload?path=" + encodeURIComponent(relativePath);
-    const response = await fetch(url, { method:"POST", headers:{"Content-Type":"application/json; charset=utf-8", "X-Kanban-Edit-Token":session.token}, body:JSON.stringify(body) });
-    const payload = await response.json();
-    if (!response.ok || payload.ok === false) throw new Error(payload.error || "Upload failed");
-    showNotice("Uploaded " + file.name + ".", "ok");
+    const failed = [];
+    for (const file of files) {
+      const body = { name:file.name, contentBase64:bytesToBase64(await file.arrayBuffer()) };
+      const response = await fetch(url, { method:"POST", headers:{"Content-Type":"application/json; charset=utf-8", "X-Kanban-Edit-Token":session.token}, body:JSON.stringify(body) });
+      const payload = await response.json();
+      if (!response.ok || payload.ok === false) failed.push(file.name + ": " + (payload.error || "Upload failed"));
+    }
+    if (failed.length) throw new Error(failed.join("; "));
+    showNotice("Uploaded " + files.length + " file(s) to " + (relativePath || "Project root") + ".", "ok");
     await loadProjectFiles(projectId, relativePath);
   } catch (err) { showNotice("Upload failed: " + (err.message || "Project file upload unavailable"), "error"); }
   finally { if (button) button.disabled = false; }
